@@ -1,0 +1,279 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, Segoe UI, Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.screen {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  background: #111827;
+  color: #ffffff;
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-auto-rows: 1fr;
+}
+
+.screen.split {
+  grid-template-columns: 1fr 1fr;
+}
+
+.toolbar {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.add-btn {
+  border: none;
+  border-radius: 10px;
+  padding: 10px 16px;
+  background: rgba(17, 24, 39, 0.85);
+  color: #ffffff;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.history-btn {
+  border: none;
+  border-radius: 10px;
+  padding: 10px 16px;
+  background: rgba(37, 99, 235, 0.9);
+  color: #ffffff;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.error-msg {
+  background: rgba(127, 29, 29, 0.9);
+  color: #fecaca;
+  font-size: 0.9rem;
+  font-weight: 700;
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+
+.start-btn {
+  width: min(420px, 70vw);
+  height: min(420px, 70vw);
+  margin: auto;
+  border: none;
+  border-radius: 9999px;
+  font-size: clamp(1.6rem, 4.5vw, 3rem);
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  background: #f59e0b;
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.panel {
+  width: 100%;
+  height: 100%;
+  min-height: 50vh;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+}
+
+.panel.orange {
+  background: #f59e0b;
+}
+
+.panel.red {
+  background: #ef4444;
+}
+
+.panel h1 {
+  margin: 0 0 22px;
+  font-size: clamp(2rem, 4vw, 4rem);
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.timer {
+  font-size: clamp(5rem, 14vw, 12rem);
+  font-weight: 900;
+  line-height: 1;
+}
+
+.resolve-btn {
+  margin-top: 26px;
+  padding: 12px 24px;
+  border: none;
+  border-radius: 10px;
+  background: rgba(17, 24, 39, 0.72);
+  color: #ffffff;
+  font-size: clamp(1rem, 2vw, 1.6rem);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: rgba(0, 0, 0, 0.6);
+  display: grid;
+  place-items: center;
+}
+
+.modal {
+  width: min(620px, 92vw);
+  background: #111827;
+  border: 1px solid #374151;
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.history-modal {
+  width: min(1000px, 95vw);
+}
+
+.history-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.history-filters input {
+  background: #1f2937;
+  color: #ffffff;
+  border: 1px solid #374151;
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.filter-btn {
+  border: none;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-weight: 700;
+  background: #2563eb;
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.filter-btn.secondary {
+  background: #4b5563;
+}
+
+.filter-btn.success {
+  background: #16a34a;
+}
+
+.history-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.preset-btn {
+  border: none;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-weight: 700;
+  background: #0f766e;
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.modal h2 {
+  margin-top: 0;
+  margin-bottom: 12px;
+}
+
+.random-btn,
+.choice-btn,
+.close-btn {
+  width: 100%;
+  border: none;
+  border-radius: 10px;
+  padding: 11px;
+  margin-bottom: 8px;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.random-btn {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.choice-list {
+  max-height: 45vh;
+  overflow-y: auto;
+}
+
+.choice-btn {
+  background: #1f2937;
+  color: #ffffff;
+}
+
+.close-btn {
+  background: #4b5563;
+  color: #ffffff;
+}
+
+.history-table-wrap {
+  max-height: 52vh;
+  overflow: auto;
+  border: 1px solid #374151;
+  border-radius: 8px;
+  margin-bottom: 10px;
+}
+
+.history-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 750px;
+}
+
+.history-table th,
+.history-table td {
+  border-bottom: 1px solid #374151;
+  text-align: left;
+  padding: 10px;
+  font-size: 0.95rem;
+}
+
+.history-table th {
+  position: sticky;
+  top: 0;
+  background: #1f2937;
+}
+
+.history-state {
+  padding: 16px;
+  font-weight: 700;
+}
+
+.error-text {
+  color: #fecaca;
+}
+
+.hidden-tick {
+  display: none;
+}
