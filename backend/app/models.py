@@ -31,9 +31,13 @@ class Incident(Base):
     )
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    start_level: Mapped[IncidentLevel] = mapped_column(
+        Enum(IncidentLevel, name="incident_level"), nullable=False, default=IncidentLevel.GREEN
+    )
     max_level_reached: Mapped[IncidentLevel] = mapped_column(
         Enum(IncidentLevel, name="incident_level"), nullable=False, default=IncidentLevel.ORANGE
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
+    notification_level_sent: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

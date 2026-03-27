@@ -1,17 +1,29 @@
-import { useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
-type Incident = {
+import AlertBanner from "./components/AlertBanner";
+import RemoteActionBar from "./components/RemoteActionBar";
+import { type RemoteMode, useRemoteNavigation } from "./hooks/useRemoteNavigation";
+import {
+  type IncidentActionState,
+  type IncidentAuditEvent,
+  type Severity,
+  SEVERITY_LABELS,
+  createDefaultActionState,
+} from "./types";
+
+type ApiIncident = {
   id: number;
   message: string;
   status: "ACTIVE" | "RESOLVED";
   started_at: string;
   resolved_at: string | null;
   duration_seconds: number | null;
-  max_level_reached: "ORANGE" | "RED" | "GREEN";
+  start_level: Severity;
+  max_level_reached: Severity;
 };
 
 type HistoryResponse = {
-  items: Incident[];
+  items: ApiIncident[];
   total: number;
   limit: number;
   offset: number;
@@ -19,6 +31,9 @@ type HistoryResponse = {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
+const INCIDENT_CHOICES_STORAGE_KEY = "pcc_incident_choices_v1";
+const INCIDENT_ACTIONS_STORAGE_KEY = "pcc_incident_actions_v1";
+const INCIDENT_AUDIT_STORAGE_KEY = "pcc_incident_audit_v1";
 
 const INCIDENT_CHOICES = [
   "Panne signalisation",
@@ -41,6 +56,20 @@ function formatMMSS(total: number) {
 
 function elapsedSeconds(startedAt: string) {
   return Math.max(0, Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000));
+}
+
+function getCurrentLevel(incident: ApiIncident, elapsed: number): Severity {
+  if (incident.start_level === "RED") return "RED";
+  if (incident.start_level === "ORANGE") {
+    return elapsed >= 15 * 60 ? "RED" : "ORANGE";
+  }
+  if (elapsed >= 30 * 60) return "RED";
+  if (elapsed >= 15 * 60) return "ORANGE";
+  return "GREEN";
+}
+
+function getSeverityLabel(level: Severity) {
+  return SEVERITY_LABELS[level];
 }
 
 function formatDateTime(value: string | null) {
@@ -81,30 +110,171 @@ function escapeCsv(value: string) {
 }
 
 export default function App() {
-  const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [incidents, setIncidents] = useState<ApiIncident[]>([]);
   const [nowTick, setNowTick] = useState(0);
   const [busy, setBusy] = useState(false);
   const [showChooser, setShowChooser] = useState(false);
+  const [customMessage, setCustomMessage] = useState("");
+  const [selectedStartLevel, setSelectedStartLevel] = useState<"GREEN" | "ORANGE" | "RED">("GREEN");
+  const [incidentChoices, setIncidentChoices] = useState<string[]>(INCIDENT_CHOICES);
   const [error, setError] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
-  const [historyItems, setHistoryItems] = useState<Incident[]>([]);
+  const [historyItems, setHistoryItems] = useState<ApiIncident[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [historyFrom, setHistoryFrom] = useState("");
   const [historyTo, setHistoryTo] = useState("");
+  const [historyIncident, setHistoryIncident] = useState("");
+  const [historyType, setHistoryType] = useState("");
+  const [historySeverity, setHistorySeverity] = useState<"" | "GREEN" | "ORANGE" | "RED">("");
+  const [remoteMode, setRemoteMode] = useState<RemoteMode>("direct");
+  const [selectedRemoteIncidentId, setSelectedRemoteIncidentId] = useState<number | null>(null);
+  const [actionStateByIncident, setActionStateByIncident] = useState<Record<number, IncidentActionState>>({});
+  const [auditHistory, setAuditHistory] = useState<IncidentAuditEvent[]>([]);
+  const severityRefByIncident = useRef<Record<number, Severity>>({});
+  const actionStateRef = useRef<Record<number, IncidentActionState>>({});
 
   const visible = useMemo(() => incidents, [incidents]);
+  const primaryIncident = visible[0] ?? null;
+  const selectedRemoteIncident =
+    visible.find((incident) => incident.id === selectedRemoteIncidentId) ?? primaryIncident ?? null;
+
+  useEffect(() => {
+    if (visible.length === 0) {
+      setSelectedRemoteIncidentId(null);
+      return;
+    }
+
+    const hasSelected = selectedRemoteIncidentId !== null && visible.some((item) => item.id === selectedRemoteIncidentId);
+    if (!hasSelected) {
+      setSelectedRemoteIncidentId(visible[0].id);
+    }
+  }, [visible, selectedRemoteIncidentId]);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(INCIDENT_CHOICES_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) return;
+      const cleaned = parsed
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0);
+
+      if (cleaned.length > 0) {
+        setIncidentChoices(cleaned);
+      }
+    } catch {
+      // ignore corrupted local storage
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(INCIDENT_CHOICES_STORAGE_KEY, JSON.stringify(incidentChoices));
+  }, [incidentChoices]);
+
+  useEffect(() => {
+    try {
+      const rawActions = window.localStorage.getItem(INCIDENT_ACTIONS_STORAGE_KEY);
+      if (rawActions) {
+        const parsed = JSON.parse(rawActions) as Record<number, IncidentActionState>;
+        setActionStateByIncident(parsed);
+      }
+      const rawAudit = window.localStorage.getItem(INCIDENT_AUDIT_STORAGE_KEY);
+      if (rawAudit) {
+        const parsedAudit = JSON.parse(rawAudit) as IncidentAuditEvent[];
+        setAuditHistory(parsedAudit);
+      }
+    } catch {
+      // ignore invalid persistence data
+    }
+  }, []);
+
+  useEffect(() => {
+    actionStateRef.current = actionStateByIncident;
+    window.localStorage.setItem(INCIDENT_ACTIONS_STORAGE_KEY, JSON.stringify(actionStateByIncident));
+  }, [actionStateByIncident]);
+
+  useEffect(() => {
+    window.localStorage.setItem(INCIDENT_AUDIT_STORAGE_KEY, JSON.stringify(auditHistory));
+  }, [auditHistory]);
+
+  function pushAuditEvent(event: Omit<IncidentAuditEvent, "id">) {
+    const id = `${event.incidentId}-${event.type}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    setAuditHistory((prev) => [{ id, ...event }, ...prev].slice(0, 2000));
+  }
+
+  function getActionState(incidentId: number): IncidentActionState {
+    return actionStateByIncident[incidentId] ?? createDefaultActionState();
+  }
+
+  function togglePassengerDone(incidentId: number) {
+    setActionStateByIncident((prev) => {
+      const current = prev[incidentId] ?? createDefaultActionState();
+      const done = !current.passengerAnnouncement.done;
+      const next: IncidentActionState = {
+        ...current,
+        passengerAnnouncement: {
+          ...current.passengerAnnouncement,
+          done,
+          doneAt: done ? new Date().toISOString() : null,
+          doneBy: "OPÉRATEUR PCC",
+        },
+      };
+      return { ...prev, [incidentId]: next };
+    });
+
+    pushAuditEvent({
+      incidentId,
+      timestamp: new Date().toISOString(),
+      type: getActionState(incidentId).passengerAnnouncement.done
+        ? "PASSENGER_ANNOUNCEMENT_RESET"
+        : "PASSENGER_ANNOUNCEMENT_DONE",
+      doneBy: "OPÉRATEUR PCC",
+    });
+  }
+
+  function toggleOnCallDone(incidentId: number) {
+    setActionStateByIncident((prev) => {
+      const current = prev[incidentId] ?? createDefaultActionState();
+      const done = !current.onCallContact.done;
+      const next: IncidentActionState = {
+        ...current,
+        onCallContact: {
+          ...current.onCallContact,
+          done,
+          doneAt: done ? new Date().toISOString() : null,
+          doneBy: "OPÉRATEUR PCC",
+        },
+      };
+      return { ...prev, [incidentId]: next };
+    });
+
+    pushAuditEvent({
+      incidentId,
+      timestamp: new Date().toISOString(),
+      type: getActionState(incidentId).onCallContact.done ? "ON_CALL_CONTACT_RESET" : "ON_CALL_CONTACT_DONE",
+      doneBy: "OPÉRATEUR PCC",
+    });
+  }
 
   async function fetchActive() {
     const response = await fetch(`${API_BASE_URL}/api/incidents/active`);
     if (!response.ok) {
       throw new Error("Failed to load active incidents");
     }
-    const data = (await response.json()) as Incident[];
+    const data = (await response.json()) as ApiIncident[];
     setIncidents(data);
   }
 
-  async function fetchHistory(filters?: { from?: string; to?: string }) {
+  async function fetchHistory(filters?: {
+    from?: string;
+    to?: string;
+    incident?: string;
+    incidentType?: string;
+    severity?: "" | "GREEN" | "ORANGE" | "RED";
+  }) {
     setHistoryLoading(true);
     setHistoryError(null);
     try {
@@ -118,6 +288,15 @@ export default function App() {
       }
       if (filters?.to) {
         params.set("to", new Date(`${filters.to}T23:59:59`).toISOString());
+      }
+      if (filters?.incident && filters.incident.trim()) {
+        params.set("incident", filters.incident.trim());
+      }
+      if (filters?.incidentType && filters.incidentType.trim()) {
+        params.set("incident_type", filters.incidentType.trim());
+      }
+      if (filters?.severity) {
+        params.set("severity", filters.severity);
       }
 
       const response = await fetch(`${API_BASE_URL}/api/incidents/history?${params.toString()}`);
@@ -135,16 +314,36 @@ export default function App() {
 
   function openHistory() {
     setShowHistory(true);
-    void fetchHistory();
+    void fetchHistory({
+      from: historyFrom,
+      to: historyTo,
+      incident: historyIncident,
+      incidentType: historyType,
+      severity: historySeverity,
+    });
   }
 
   function applyHistoryFilters() {
-    void fetchHistory({ from: historyFrom, to: historyTo });
+    void fetchHistory({
+      from: historyFrom,
+      to: historyTo,
+      incident: historyIncident,
+      incidentType: historyType,
+      severity: historySeverity,
+    });
+  }
+
+  function submitHistoryFilters(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    applyHistoryFilters();
   }
 
   function clearHistoryFilters() {
     setHistoryFrom("");
     setHistoryTo("");
+    setHistoryIncident("");
+    setHistoryType("");
+    setHistorySeverity("");
     void fetchHistory();
   }
 
@@ -152,7 +351,13 @@ export default function App() {
     const today = toDateInputValue(new Date());
     setHistoryFrom(today);
     setHistoryTo(today);
-    void fetchHistory({ from: today, to: today });
+    void fetchHistory({
+      from: today,
+      to: today,
+      incident: historyIncident,
+      incidentType: historyType,
+      severity: historySeverity,
+    });
   }
 
   function applyYesterdayPreset() {
@@ -161,7 +366,13 @@ export default function App() {
     const yesterday = toDateInputValue(date);
     setHistoryFrom(yesterday);
     setHistoryTo(yesterday);
-    void fetchHistory({ from: yesterday, to: yesterday });
+    void fetchHistory({
+      from: yesterday,
+      to: yesterday,
+      incident: historyIncident,
+      incidentType: historyType,
+      severity: historySeverity,
+    });
   }
 
   function applyThisWeekPreset() {
@@ -174,7 +385,13 @@ export default function App() {
     const end = toDateInputValue(now);
     setHistoryFrom(start);
     setHistoryTo(end);
-    void fetchHistory({ from: start, to: end });
+    void fetchHistory({
+      from: start,
+      to: end,
+      incident: historyIncident,
+      incidentType: historyType,
+      severity: historySeverity,
+    });
   }
 
   function exportHistoryCsv() {
@@ -202,20 +419,35 @@ export default function App() {
     URL.revokeObjectURL(url);
   }
 
-  async function startIncident(message: string) {
+  async function startIncident(message: string, startLevel: "GREEN" | "ORANGE" | "RED") {
     if (busy) return;
+    const trimmedMessage = message.trim();
+    if (!trimmedMessage) {
+      setError("Le texte de l'incident est obligatoire");
+      return;
+    }
+
     setBusy(true);
     setError(null);
     try {
       const response = await fetch(`${API_BASE_URL}/api/incidents`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message }),
+        body: JSON.stringify({ message: trimmedMessage, start_level: startLevel }),
       });
       if (!response.ok) {
         throw new Error("Failed to create incident");
       }
+      const created = (await response.json()) as ApiIncident;
+      pushAuditEvent({
+        incidentId: created.id,
+        timestamp: new Date().toISOString(),
+        type: "INCIDENT_STARTED",
+        severity: startLevel,
+        note: created.message,
+      });
       await fetchActive();
+      setCustomMessage("");
       setShowChooser(false);
     } catch {
       setError("Impossible de créer l'incident");
@@ -224,10 +456,24 @@ export default function App() {
     }
   }
 
-  function startRandomIncident() {
-    const randomIndex = Math.floor(Math.random() * INCIDENT_CHOICES.length);
-    const randomIncident = INCIDENT_CHOICES[randomIndex];
-    void startIncident(randomIncident);
+  function addIncidentChoice() {
+    const value = customMessage.trim();
+    if (!value) {
+      setError("Le texte de l'incident est obligatoire");
+      return;
+    }
+    if (incidentChoices.some((item) => item.toLowerCase() === value.toLowerCase())) {
+      setError("Cet incident existe déjà dans la liste");
+      return;
+    }
+
+    setIncidentChoices((prev) => [value, ...prev]);
+    setCustomMessage("");
+    setError(null);
+  }
+
+  function deleteIncidentChoice(value: string) {
+    setIncidentChoices((prev) => prev.filter((item) => item !== value));
   }
 
   async function resolveIncident(id: number) {
@@ -241,9 +487,67 @@ export default function App() {
       if (!response.ok) {
         throw new Error("Failed to resolve incident");
       }
+      pushAuditEvent({
+        incidentId: id,
+        timestamp: new Date().toISOString(),
+        type: "INCIDENT_RESOLVED",
+        doneBy: "OPÉRATEUR PCC",
+      });
       await fetchActive();
     } catch {
       setError("Impossible de résoudre l'incident");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function forceRedIncident(id: number) {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/incidents/${id}/force-red`, {
+        method: "POST",
+      });
+      if (!response.ok) {
+        throw new Error("Failed to force red");
+      }
+      pushAuditEvent({
+        incidentId: id,
+        timestamp: new Date().toISOString(),
+        type: "SEVERITY_CHANGED",
+        severity: "RED",
+        doneBy: "OPÉRATEUR PCC",
+      });
+      await fetchActive();
+    } catch {
+      setError("Impossible de passer en rouge");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function forceOrangeIncident(id: number) {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/incidents/${id}/force-orange`, {
+        method: "POST",
+      });
+      if (!response.ok) {
+        throw new Error("Failed to force orange");
+      }
+      pushAuditEvent({
+        incidentId: id,
+        timestamp: new Date().toISOString(),
+        type: "SEVERITY_CHANGED",
+        severity: "ORANGE",
+        doneBy: "OPÉRATEUR PCC",
+      });
+      await fetchActive();
+    } catch {
+      setError("Impossible de passer en orange");
     } finally {
       setBusy(false);
     }
@@ -298,13 +602,107 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    const nextByIncident: Record<number, Severity> = {};
+
+    for (const incident of visible) {
+      const severity = getCurrentLevel(incident, elapsedSeconds(incident.started_at));
+      nextByIncident[incident.id] = severity;
+
+      const previousSeverity = severityRefByIncident.current[incident.id];
+      if (previousSeverity && previousSeverity !== severity) {
+        pushAuditEvent({
+          incidentId: incident.id,
+          timestamp: new Date().toISOString(),
+          type: "SEVERITY_CHANGED",
+          severity,
+        });
+      }
+    }
+
+    severityRefByIncident.current = nextByIncident;
+  }, [visible, nowTick]);
+
+  function closeTransientPanels() {
+    if (showHistory) {
+      setShowHistory(false);
+      return;
+    }
+    if (showChooser) {
+      setShowChooser(false);
+      return;
+    }
+    setRemoteMode("direct");
+  }
+
+  function runPrimaryAction() {
+    if (!selectedRemoteIncident) {
+      setShowChooser(true);
+      return;
+    }
+
+    const elapsed = elapsedSeconds(selectedRemoteIncident.started_at);
+    const severity = getCurrentLevel(selectedRemoteIncident, elapsed);
+    const actionState = actionStateRef.current[selectedRemoteIncident.id] ?? createDefaultActionState();
+
+    if (!actionState.passengerAnnouncement.done) {
+      togglePassengerDone(selectedRemoteIncident.id);
+      return;
+    }
+
+    if (severity === "RED" && !actionState.onCallContact.done) {
+      toggleOnCallDone(selectedRemoteIncident.id);
+    }
+  }
+
+  function runSecureResolveFromRemote() {
+    if (!selectedRemoteIncident || busy) return;
+    void resolveIncident(selectedRemoteIncident.id);
+  }
+
+  function selectPreviousIncident() {
+    if (visible.length <= 1 || !selectedRemoteIncident) return;
+    const currentIndex = visible.findIndex((item) => item.id === selectedRemoteIncident.id);
+    const nextIndex = (currentIndex - 1 + visible.length) % visible.length;
+    setSelectedRemoteIncidentId(visible[nextIndex].id);
+  }
+
+  function selectNextIncident() {
+    if (visible.length <= 1 || !selectedRemoteIncident) return;
+    const currentIndex = visible.findIndex((item) => item.id === selectedRemoteIncident.id);
+    const nextIndex = (currentIndex + 1) % visible.length;
+    setSelectedRemoteIncidentId(visible[nextIndex].id);
+  }
+
+  const remoteTargetIds = [
+    "action-passenger",
+    "action-oncall",
+    "remote-target-prev",
+    "remote-target-next",
+    "remote-mode",
+    "remote-passenger",
+    "remote-oncall",
+    "remote-resolve",
+    "toolbar-add",
+    "toolbar-history",
+  ];
+
+  useRemoteNavigation({
+    enabled: !showChooser && !showHistory,
+    mode: remoteMode,
+    targetIds: remoteTargetIds,
+    onPrimaryAction: runPrimaryAction,
+    onSecureResolveAction: runSecureResolveFromRemote,
+    onBackAction: closeTransientPanels,
+  });
+
   return (
     <div className={`screen ${visible.length >= 2 ? "split" : "single"}`}>
       <div className="toolbar">
-        <button className="add-btn" onClick={() => setShowChooser(true)} disabled={busy}>
+        <button data-remote-id="toolbar-add" className="add-btn" onClick={() => setShowChooser(true)} disabled={busy}>
           + Ajouter incident
         </button>
-        <button className="history-btn" onClick={openHistory} disabled={busy}>
+        <button data-remote-id="toolbar-history" className="history-btn" onClick={openHistory} disabled={busy}>
           Historique
         </button>
         {error && <div className="error-msg">{error}</div>}
@@ -317,31 +715,130 @@ export default function App() {
       ) : (
         visible.map((incident) => {
           const elapsed = elapsedSeconds(incident.started_at);
-          const isRed = elapsed >= 15 * 60;
+          const currentLevel = getCurrentLevel(incident, elapsed);
+          const incidentActionState = getActionState(incident.id);
+          const levelClass = currentLevel.toLowerCase();
+          const isSelectedRemoteTarget = selectedRemoteIncident?.id === incident.id;
           return (
-            <section key={incident.id} className={`panel ${isRed ? "red" : "orange"}`}>
-              <h1>{incident.message}</h1>
-              <div className="timer">{formatMMSS(elapsed)}</div>
-              <button className="resolve-btn" onClick={() => void resolveIncident(incident.id)} disabled={busy}>
-                {busy ? "..." : "Résolu"}
-              </button>
+            <section
+              key={incident.id}
+              className={`panel ${levelClass} ${isSelectedRemoteTarget ? "panel-selected" : ""}`}
+            >
+              <AlertBanner
+                inline
+                severity={currentLevel}
+                passengerDone={incidentActionState.passengerAnnouncement.done}
+                onCallDone={incidentActionState.onCallContact.done}
+                onTogglePassenger={() => togglePassengerDone(incident.id)}
+                onToggleOnCall={() => toggleOnCallDone(incident.id)}
+              />
+              <div className="panel-main">
+                <h1>{incident.message}</h1>
+                <div className="started-at">Début: {formatDateTime(incident.started_at)}</div>
+                <div className="severity-word">{getSeverityLabel(currentLevel)}</div>
+                <div className="timer">{formatMMSS(elapsed)}</div>
+              </div>
+              <div className="panel-actions">
+                {currentLevel === "GREEN" && (
+                  <button
+                    className="force-orange-btn"
+                    onClick={() => void forceOrangeIncident(incident.id)}
+                    disabled={busy}
+                  >
+                    {busy ? "..." : "Passer en modéré"}
+                  </button>
+                )}
+                {currentLevel !== "RED" && (
+                  <button className="force-red-btn" onClick={() => void forceRedIncident(incident.id)} disabled={busy}>
+                    {busy ? "..." : "Passer en critique"}
+                  </button>
+                )}
+              </div>
             </section>
           );
         })
       )}
 
+      <RemoteActionBar
+        mode={remoteMode}
+        busy={busy}
+        canResolve={Boolean(selectedRemoteIncident)}
+        targetIncidentLabel={
+          selectedRemoteIncident
+            ? `#${selectedRemoteIncident.id} — ${selectedRemoteIncident.message}`
+            : "Aucun incident"
+        }
+        onSelectPreviousIncident={selectPreviousIncident}
+        onSelectNextIncident={selectNextIncident}
+        onToggleMode={() => setRemoteMode((prev) => (prev === "direct" ? "navigation" : "direct"))}
+        onPassengerAction={() => {
+          if (!selectedRemoteIncident) return;
+          togglePassengerDone(selectedRemoteIncident.id);
+        }}
+        onOnCallAction={() => {
+          if (!selectedRemoteIncident) return;
+          toggleOnCallDone(selectedRemoteIncident.id);
+        }}
+        onResolveAction={runSecureResolveFromRemote}
+      />
+
       {showChooser && (
         <div className="modal-overlay" onClick={() => setShowChooser(false)}>
           <div className="modal" onClick={(event) => event.stopPropagation()}>
             <h2>Choisir un incident</h2>
-            <button className="random-btn" onClick={startRandomIncident} disabled={busy}>
-              Incident aléatoire
+            <div className="level-select">
+              <button
+                className={`level-btn ${selectedStartLevel === "GREEN" ? "active green" : ""}`}
+                onClick={() => setSelectedStartLevel("GREEN")}
+                disabled={busy}
+              >
+                Départ Mineur
+              </button>
+              <button
+                className={`level-btn ${selectedStartLevel === "ORANGE" ? "active orange" : ""}`}
+                onClick={() => setSelectedStartLevel("ORANGE")}
+                disabled={busy}
+              >
+                Départ Modéré
+              </button>
+              <button
+                className={`level-btn ${selectedStartLevel === "RED" ? "active red" : ""}`}
+                onClick={() => setSelectedStartLevel("RED")}
+                disabled={busy}
+              >
+                Départ Critique
+              </button>
+            </div>
+            <textarea
+              className="custom-input"
+              rows={3}
+              maxLength={500}
+              value={customMessage}
+              onChange={(event) => setCustomMessage(event.target.value)}
+              placeholder="Entrer un nouvel incident..."
+            />
+            <button className="custom-start-btn" onClick={addIncidentChoice} disabled={busy}>
+              Ajouter à la liste
             </button>
             <div className="choice-list">
-              {INCIDENT_CHOICES.map((choice) => (
-                <button key={choice} className="choice-btn" onClick={() => void startIncident(choice)} disabled={busy}>
-                  {choice}
-                </button>
+              {incidentChoices.map((choice) => (
+                <div key={choice} className="choice-row">
+                  <button
+                    className="choice-btn"
+                    onClick={() => void startIncident(choice, selectedStartLevel)}
+                    disabled={busy}
+                  >
+                    {choice}
+                  </button>
+                  <button
+                    className="delete-choice-btn"
+                    onClick={() => deleteIncidentChoice(choice)}
+                    disabled={busy}
+                    title="Supprimer cet incident"
+                  >
+                    Supprimer
+                  </button>
+                </div>
               ))}
             </div>
             <button className="close-btn" onClick={() => setShowChooser(false)} disabled={busy}>
@@ -355,31 +852,80 @@ export default function App() {
         <div className="modal-overlay" onClick={() => setShowHistory(false)}>
           <div className="modal history-modal" onClick={(event) => event.stopPropagation()}>
             <h2>Historique des incidents</h2>
-            <div className="history-filters">
-              <input
-                type="date"
-                value={historyFrom}
-                onChange={(event) => setHistoryFrom(event.target.value)}
-              />
-              <input
-                type="date"
-                value={historyTo}
-                onChange={(event) => setHistoryTo(event.target.value)}
-              />
-              <button className="filter-btn" onClick={applyHistoryFilters} disabled={historyLoading}>
+            <form className="history-controls" onSubmit={submitHistoryFilters}>
+              <div className="history-filters-grid">
+                <label className="history-field">
+                  <span>Date début</span>
+                  <input
+                    type="date"
+                    lang="fr-FR"
+                    value={historyFrom}
+                    onChange={(event) => setHistoryFrom(event.target.value)}
+                  />
+                </label>
+                <label className="history-field">
+                  <span>Date fin</span>
+                  <input
+                    type="date"
+                    lang="fr-FR"
+                    value={historyTo}
+                    onChange={(event) => setHistoryTo(event.target.value)}
+                  />
+                </label>
+                <label className="history-field">
+                  <span>Gravité</span>
+                  <select
+                    value={historySeverity}
+                    onChange={(event) =>
+                      setHistorySeverity(event.target.value as "" | "GREEN" | "ORANGE" | "RED")
+                    }
+                  >
+                    <option value="">Toutes gravités</option>
+                    <option value="GREEN">Mineur</option>
+                    <option value="ORANGE">Modéré</option>
+                    <option value="RED">Critique</option>
+                  </select>
+                </label>
+                <label className="history-field">
+                  <span>Type d'incident</span>
+                  <select value={historyType} onChange={(event) => setHistoryType(event.target.value)}>
+                    <option value="">Tous types</option>
+                    {incidentChoices.map((choice) => (
+                      <option key={choice} value={choice}>
+                        {choice}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="history-field history-field-wide">
+                  <span>Recherche incident</span>
+                  <input
+                    type="text"
+                    className="history-incident-input"
+                    value={historyIncident}
+                    onChange={(event) => setHistoryIncident(event.target.value)}
+                    placeholder="Texte incident..."
+                  />
+                </label>
+              </div>
+
+              <div className="history-filters-actions">
+              <button type="submit" className="filter-btn" disabled={historyLoading}>
                 Appliquer
               </button>
-              <button className="filter-btn secondary" onClick={clearHistoryFilters} disabled={historyLoading}>
+              <button type="button" className="filter-btn secondary" onClick={clearHistoryFilters} disabled={historyLoading}>
                 Réinitialiser
               </button>
               <button
+                type="button"
                 className="filter-btn success"
                 onClick={exportHistoryCsv}
                 disabled={historyLoading || historyItems.length === 0}
               >
                 Exporter CSV
               </button>
-            </div>
+              </div>
+            </form>
             <div className="history-presets">
               <button className="preset-btn" onClick={applyTodayPreset} disabled={historyLoading}>
                 Aujourd'hui
@@ -400,6 +946,7 @@ export default function App() {
                   <thead>
                     <tr>
                       <th>Incident</th>
+                      <th>Gravité max</th>
                       <th>Début</th>
                       <th>Résolution</th>
                       <th>Durée</th>
@@ -408,12 +955,13 @@ export default function App() {
                   <tbody>
                     {historyItems.length === 0 ? (
                       <tr>
-                        <td colSpan={4}>Aucun incident résolu</td>
+                        <td colSpan={5}>Aucun incident résolu</td>
                       </tr>
                     ) : (
                       historyItems.map((item) => (
                         <tr key={item.id}>
                           <td>{item.message}</td>
+                          <td>{getSeverityLabel(item.max_level_reached)}</td>
                           <td>{formatDateTime(item.started_at)}</td>
                           <td>{formatDateTime(item.resolved_at)}</td>
                           <td>{formatDuration(item.duration_seconds)}</td>

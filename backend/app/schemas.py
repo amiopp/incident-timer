@@ -7,6 +7,7 @@ from app.models import IncidentLevel, IncidentStatus
 
 class IncidentCreate(BaseModel):
     message: str = Field(..., min_length=1, max_length=500)
+    start_level: IncidentLevel = IncidentLevel.GREEN
 
 
 class IncidentResponse(BaseModel):
@@ -16,6 +17,7 @@ class IncidentResponse(BaseModel):
     started_at: datetime
     resolved_at: datetime | None
     duration_seconds: int | None
+    start_level: IncidentLevel
     max_level_reached: IncidentLevel
     created_at: datetime
 

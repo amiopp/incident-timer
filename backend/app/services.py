@@ -7,6 +7,13 @@ from app.config import settings
 from app.models import Incident, IncidentLevel, IncidentStatus
 
 
+LEVEL_ORDER = {
+    IncidentLevel.GREEN: 0,
+    IncidentLevel.ORANGE: 1,
+    IncidentLevel.RED: 2,
+}
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -17,28 +24,48 @@ def _as_utc(value: datetime) -> datetime:
     return value.astimezone(timezone.utc)
 
 
+def _max_level(level_a: IncidentLevel, level_b: IncidentLevel) -> IncidentLevel:
+    return level_a if LEVEL_ORDER[level_a] >= LEVEL_ORDER[level_b] else level_b
+
+
+def _current_level(incident: Incident, at_time: datetime) -> IncidentLevel:
+    started_at = _as_utc(incident.started_at)
+    elapsed_seconds = int((at_time - started_at).total_seconds())
+
+    if incident.start_level == IncidentLevel.RED:
+        return IncidentLevel.RED
+
+    if incident.start_level == IncidentLevel.ORANGE:
+        return IncidentLevel.RED if elapsed_seconds >= settings.red_threshold_seconds else IncidentLevel.ORANGE
+
+    if elapsed_seconds >= settings.red_threshold_seconds * 2:
+        return IncidentLevel.RED
+    if elapsed_seconds >= settings.red_threshold_seconds:
+        return IncidentLevel.ORANGE
+    return IncidentLevel.GREEN
+
+
 def update_overdue_active_levels(db: Session) -> None:
-    red_cutoff = _utcnow() - timedelta(seconds=settings.red_threshold_seconds)
-    incidents = db.scalars(
-        select(Incident).where(
-            Incident.status == IncidentStatus.ACTIVE,
-            Incident.max_level_reached == IncidentLevel.ORANGE,
-            Incident.started_at <= red_cutoff,
-        )
-    ).all()
+    now = _utcnow()
+    incidents = db.scalars(select(Incident).where(Incident.status == IncidentStatus.ACTIVE)).all()
     changed = False
     for incident in incidents:
-        incident.max_level_reached = IncidentLevel.RED
-        changed = True
+        current_level = _current_level(incident, now)
+        new_max = _max_level(incident.max_level_reached, current_level)
+        if new_max != incident.max_level_reached:
+            incident.max_level_reached = new_max
+            changed = True
     if changed:
         db.commit()
 
 
-def create_incident(db: Session, message: str) -> Incident:
+def create_incident(db: Session, message: str, start_level: IncidentLevel) -> Incident:
     incident = Incident(
         message=message.strip(),
         status=IncidentStatus.ACTIVE,
-        max_level_reached=IncidentLevel.ORANGE,
+        start_level=start_level,
+        max_level_reached=start_level,
+        notification_level_sent=0,
     )
     db.add(incident)
     db.commit()
@@ -67,11 +94,37 @@ def resolve_incident(db: Session, incident_id: int) -> Incident | None:
     incident.status = IncidentStatus.RESOLVED
     incident.resolved_at = resolved_at
     incident.duration_seconds = duration_seconds
-    incident.max_level_reached = (
-        IncidentLevel.RED
-        if duration_seconds >= settings.red_threshold_seconds
-        else IncidentLevel.ORANGE
-    )
+    current_level = _current_level(incident, resolved_at)
+    incident.max_level_reached = _max_level(incident.max_level_reached, current_level)
+
+    db.commit()
+    db.refresh(incident)
+    return incident
+
+
+def force_incident_red(db: Session, incident_id: int) -> Incident | None:
+    incident = db.get(Incident, incident_id)
+    if not incident or incident.status != IncidentStatus.ACTIVE:
+        return None
+
+    incident.start_level = IncidentLevel.RED
+    incident.max_level_reached = IncidentLevel.RED
+
+    db.commit()
+    db.refresh(incident)
+    return incident
+
+
+def force_incident_orange(db: Session, incident_id: int) -> Incident | None:
+    incident = db.get(Incident, incident_id)
+    if not incident or incident.status != IncidentStatus.ACTIVE:
+        return None
+
+    if incident.start_level == IncidentLevel.RED or incident.max_level_reached == IncidentLevel.RED:
+        return incident
+
+    incident.start_level = IncidentLevel.ORANGE
+    incident.max_level_reached = _max_level(incident.max_level_reached, IncidentLevel.ORANGE)
 
     db.commit()
     db.refresh(incident)
@@ -83,6 +136,9 @@ def get_history(
     status: IncidentStatus | None,
     from_dt: datetime | None,
     to_dt: datetime | None,
+    incident: str | None,
+    incident_type: str | None,
+    severity: IncidentLevel | None,
     limit: int,
     offset: int,
 ) -> tuple[list[Incident], int]:
@@ -100,6 +156,20 @@ def get_history(
     if to_dt:
         base_query = base_query.where(Incident.started_at <= to_dt)
         count_query = count_query.where(Incident.started_at <= to_dt)
+    if incident:
+        incident_text = incident.strip()
+        if incident_text:
+            pattern = f"%{incident_text}%"
+            base_query = base_query.where(Incident.message.ilike(pattern))
+            count_query = count_query.where(Incident.message.ilike(pattern))
+    if incident_type:
+        incident_type_text = incident_type.strip()
+        if incident_type_text:
+            base_query = base_query.where(Incident.message == incident_type_text)
+            count_query = count_query.where(Incident.message == incident_type_text)
+    if severity:
+        base_query = base_query.where(Incident.max_level_reached == severity)
+        count_query = count_query.where(Incident.max_level_reached == severity)
 
     total = db.scalar(count_query) or 0
     items = db.scalars(

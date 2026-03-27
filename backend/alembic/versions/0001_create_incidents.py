@@ -51,6 +51,7 @@ def upgrade() -> None:
         sa.Column("duration_seconds", sa.Integer(), nullable=True),
         sa.Column("max_level_reached", level_type, nullable=False, server_default="ORANGE"),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        sa.Column("notification_level_sent", sa.Integer(), nullable=False, server_default="0"),
     )
     op.create_index("ix_incidents_status_started_at", "incidents", ["status", "started_at"])
 
