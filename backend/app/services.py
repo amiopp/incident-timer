@@ -1,6 +1,6 @@
 from datetime import datetime, timezone, timedelta
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -59,8 +59,10 @@ def update_overdue_active_levels(db: Session) -> None:
         db.commit()
 
 
-def create_incident(db: Session, message: str, start_level: IncidentLevel) -> Incident:
+def create_incident(db: Session, message: str, start_level: IncidentLevel, line: str | None = None) -> Incident:
+    normalized_line = line.strip().upper() if line and line.strip() else None
     incident = Incident(
+        line=normalized_line,
         message=message.strip(),
         status=IncidentStatus.ACTIVE,
         start_level=start_level,
@@ -138,6 +140,7 @@ def get_history(
     to_dt: datetime | None,
     incident: str | None,
     incident_type: str | None,
+    line: str | None,
     severity: IncidentLevel | None,
     limit: int,
     offset: int,
@@ -167,6 +170,13 @@ def get_history(
         if incident_type_text:
             base_query = base_query.where(Incident.message == incident_type_text)
             count_query = count_query.where(Incident.message == incident_type_text)
+    if line:
+        line_text = line.strip().upper()
+        if line_text:
+            # Keep compatibility with historical records where line was encoded in message.
+            legacy_prefix = f"[{line_text}] %"
+            base_query = base_query.where(or_(Incident.line == line_text, Incident.message.ilike(legacy_prefix)))
+            count_query = count_query.where(or_(Incident.line == line_text, Incident.message.ilike(legacy_prefix)))
     if severity:
         base_query = base_query.where(Incident.max_level_reached == severity)
         count_query = count_query.where(Incident.max_level_reached == severity)

@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Enum, Integer, BigInteger, Text
+from sqlalchemy import DateTime, Enum, Integer, BigInteger, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -22,6 +22,7 @@ class Incident(Base):
     __tablename__ = "incidents"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    line: Mapped[str | None] = mapped_column(String(8), nullable=True)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[IncidentStatus] = mapped_column(
         Enum(IncidentStatus, name="incident_status"), nullable=False, default=IncidentStatus.ACTIVE

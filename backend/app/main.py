@@ -43,7 +43,7 @@ def health():
 
 @app.post("/api/incidents", response_model=IncidentResponse)
 async def create_incident_endpoint(payload: IncidentCreate, db: Session = Depends(get_db)):
-    incident = create_incident(db, payload.message, payload.start_level)
+    incident = create_incident(db, payload.message, payload.start_level, payload.line)
     data = IncidentResponse.model_validate(incident).model_dump(mode="json")
     await ws_manager.broadcast("incident_created", {"incident": data})
     return incident
@@ -94,12 +94,13 @@ def get_incidents_history(
     to: datetime | None = Query(default=None),
     incident: str | None = Query(default=None),
     incident_type: str | None = Query(default=None),
+    line: str | None = Query(default=None),
     severity: models.IncidentLevel | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ):
-    items, total = get_history(db, status, from_, to, incident, incident_type, severity, limit, offset)
+    items, total = get_history(db, status, from_, to, incident, incident_type, line, severity, limit, offset)
     return HistoryResponse(items=items, total=total, limit=limit, offset=offset)
 
 

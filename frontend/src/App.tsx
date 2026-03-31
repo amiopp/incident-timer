@@ -1,6 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
-import AlertBanner from "./components/AlertBanner";
 import RemoteActionBar from "./components/RemoteActionBar";
 import { type RemoteMode, useRemoteNavigation } from "./hooks/useRemoteNavigation";
 import {
@@ -11,8 +10,11 @@ import {
   createDefaultActionState,
 } from "./types";
 
+type IncidentLine = "T1" | "T2" | "T3" | "T4" | "BW1" | "BW2";
+
 type ApiIncident = {
   id: number;
+  line: IncidentLine | null;
   message: string;
   status: "ACTIVE" | "RESOLVED";
   started_at: string;
@@ -34,6 +36,8 @@ const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
 const INCIDENT_CHOICES_STORAGE_KEY = "pcc_incident_choices_v1";
 const INCIDENT_ACTIONS_STORAGE_KEY = "pcc_incident_actions_v1";
 const INCIDENT_AUDIT_STORAGE_KEY = "pcc_incident_audit_v1";
+const INCIDENT_LINES: IncidentLine[] = ["T1", "T2", "T3", "T4", "BW1", "BW2"];
+const INCIDENT_LINE_PREFIX_PATTERN = /^\[(T1|T2|T3|T4|BW1|BW2)\]\s*/i;
 
 const INCIDENT_CHOICES = [
   "Panne signalisation",
@@ -46,12 +50,15 @@ const INCIDENT_CHOICES = [
   "Incident sécurité station",
 ];
 
-function formatMMSS(total: number) {
-  const mm = Math.floor(total / 60)
+function formatHHMMSS(total: number) {
+  const hh = Math.floor(total / 3600)
+    .toString()
+    .padStart(2, "0");
+  const mm = Math.floor((total % 3600) / 60)
     .toString()
     .padStart(2, "0");
   const ss = (total % 60).toString().padStart(2, "0");
-  return `${mm}:${ss}`;
+  return `${hh}:${mm}:${ss}`;
 }
 
 function elapsedSeconds(startedAt: string) {
@@ -109,12 +116,33 @@ function escapeCsv(value: string) {
   return `"${normalized}"`;
 }
 
+function parseIncidentLine(message: string) {
+  const match = message.match(INCIDENT_LINE_PREFIX_PATTERN);
+  const line = match?.[1]?.toUpperCase() ?? null;
+  const displayMessage = message.replace(INCIDENT_LINE_PREFIX_PATTERN, "").trim();
+  return { line, displayMessage };
+}
+
+function withIncidentLine(message: string, line: IncidentLine) {
+  const base = message.trim().replace(INCIDENT_LINE_PREFIX_PATTERN, "");
+  return `[${line}] ${base}`;
+}
+
+function getIncidentDisplay(incident: ApiIncident) {
+  const parsed = parseIncidentLine(incident.message);
+  return {
+    line: incident.line ?? parsed.line,
+    displayMessage: parsed.displayMessage,
+  };
+}
+
 export default function App() {
   const [incidents, setIncidents] = useState<ApiIncident[]>([]);
   const [nowTick, setNowTick] = useState(0);
   const [busy, setBusy] = useState(false);
   const [showChooser, setShowChooser] = useState(false);
   const [customMessage, setCustomMessage] = useState("");
+  const [selectedIncidentLine, setSelectedIncidentLine] = useState<"" | IncidentLine>("");
   const [selectedStartLevel, setSelectedStartLevel] = useState<"GREEN" | "ORANGE" | "RED">("GREEN");
   const [incidentChoices, setIncidentChoices] = useState<string[]>(INCIDENT_CHOICES);
   const [error, setError] = useState<string | null>(null);
@@ -126,6 +154,7 @@ export default function App() {
   const [historyTo, setHistoryTo] = useState("");
   const [historyIncident, setHistoryIncident] = useState("");
   const [historyType, setHistoryType] = useState("");
+  const [historyLine, setHistoryLine] = useState<"" | (typeof INCIDENT_LINES)[number]>("");
   const [historySeverity, setHistorySeverity] = useState<"" | "GREEN" | "ORANGE" | "RED">("");
   const [remoteMode, setRemoteMode] = useState<RemoteMode>("direct");
   const [selectedRemoteIncidentId, setSelectedRemoteIncidentId] = useState<number | null>(null);
@@ -138,6 +167,7 @@ export default function App() {
   const primaryIncident = visible[0] ?? null;
   const selectedRemoteIncident =
     visible.find((incident) => incident.id === selectedRemoteIncidentId) ?? primaryIncident ?? null;
+  const selectedRemoteIncidentParsed = selectedRemoteIncident ? getIncidentDisplay(selectedRemoteIncident) : null;
 
   useEffect(() => {
     if (visible.length === 0) {
@@ -273,6 +303,7 @@ export default function App() {
     to?: string;
     incident?: string;
     incidentType?: string;
+    line?: "" | (typeof INCIDENT_LINES)[number];
     severity?: "" | "GREEN" | "ORANGE" | "RED";
   }) {
     setHistoryLoading(true);
@@ -295,6 +326,9 @@ export default function App() {
       if (filters?.incidentType && filters.incidentType.trim()) {
         params.set("incident_type", filters.incidentType.trim());
       }
+      if (filters?.line) {
+        params.set("line", filters.line);
+      }
       if (filters?.severity) {
         params.set("severity", filters.severity);
       }
@@ -304,7 +338,11 @@ export default function App() {
         throw new Error("Failed to load history");
       }
       const payload = (await response.json()) as HistoryResponse;
-      setHistoryItems(payload.items);
+      const lineFilter = filters?.line ?? "";
+      const filteredItems = lineFilter
+        ? payload.items.filter((item) => getIncidentDisplay(item).line === lineFilter)
+        : payload.items;
+      setHistoryItems(filteredItems);
     } catch {
       setHistoryError("Impossible de charger l'historique");
     } finally {
@@ -319,6 +357,7 @@ export default function App() {
       to: historyTo,
       incident: historyIncident,
       incidentType: historyType,
+      line: historyLine,
       severity: historySeverity,
     });
   }
@@ -329,6 +368,7 @@ export default function App() {
       to: historyTo,
       incident: historyIncident,
       incidentType: historyType,
+      line: historyLine,
       severity: historySeverity,
     });
   }
@@ -343,6 +383,7 @@ export default function App() {
     setHistoryTo("");
     setHistoryIncident("");
     setHistoryType("");
+    setHistoryLine("");
     setHistorySeverity("");
     void fetchHistory();
   }
@@ -356,6 +397,7 @@ export default function App() {
       to: today,
       incident: historyIncident,
       incidentType: historyType,
+      line: historyLine,
       severity: historySeverity,
     });
   }
@@ -371,6 +413,7 @@ export default function App() {
       to: yesterday,
       incident: historyIncident,
       incidentType: historyType,
+      line: historyLine,
       severity: historySeverity,
     });
   }
@@ -390,20 +433,25 @@ export default function App() {
       to: end,
       incident: historyIncident,
       incidentType: historyType,
+      line: historyLine,
       severity: historySeverity,
     });
   }
 
   function exportHistoryCsv() {
-    const headers = ["incident", "debut", "resolution", "duree", "statut", "niveau_max"];
-    const rows = historyItems.map((item) => [
-      item.message,
-      item.started_at,
-      item.resolved_at ?? "",
-      formatDuration(item.duration_seconds),
-      item.status,
-      item.max_level_reached,
-    ]);
+    const headers = ["ligne", "incident", "debut", "resolution", "duree", "statut", "niveau_max"];
+    const rows = historyItems.map((item) => {
+        const parsed = getIncidentDisplay(item);
+      return [
+          parsed.line ?? "",
+          parsed.displayMessage,
+          item.started_at,
+          item.resolved_at ?? "",
+          formatDuration(item.duration_seconds),
+          item.status,
+          item.max_level_reached,
+        ];
+    });
 
     const csv = [headers, ...rows]
       .map((row) => row.map((cell) => escapeCsv(String(cell))).join(","))
@@ -419,13 +467,22 @@ export default function App() {
     URL.revokeObjectURL(url);
   }
 
-  async function startIncident(message: string, startLevel: "GREEN" | "ORANGE" | "RED") {
+  async function startIncident(
+    message: string,
+    startLevel: "GREEN" | "ORANGE" | "RED",
+    line: "" | IncidentLine = selectedIncidentLine,
+  ) {
     if (busy) return;
     const trimmedMessage = message.trim();
     if (!trimmedMessage) {
       setError("Le texte de l'incident est obligatoire");
       return;
     }
+    if (!line) {
+      setError("Veuillez sélectionner une ligne avant de démarrer l'incident");
+      return;
+    }
+    const finalMessage = withIncidentLine(trimmedMessage, line);
 
     setBusy(true);
     setError(null);
@@ -433,7 +490,7 @@ export default function App() {
       const response = await fetch(`${API_BASE_URL}/api/incidents`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: trimmedMessage, start_level: startLevel }),
+        body: JSON.stringify({ message: finalMessage, start_level: startLevel, line }),
       });
       if (!response.ok) {
         throw new Error("Failed to create incident");
@@ -710,34 +767,97 @@ export default function App() {
 
       {visible.length === 0 ? (
         <button className="start-btn" onClick={() => setShowChooser(true)} disabled={busy}>
-          {busy ? "DÉMARRAGE..." : "DÉMARRER INCIDENT"}
+          {busy ? (
+            <span className="start-btn-label">DÉMARRAGE...</span>
+          ) : (
+            <>
+              <span className="start-btn-icon" aria-hidden="true">
+                🚀
+              </span>
+              <span className="start-btn-label">DÉMARRER INCIDENT</span>
+            </>
+          )}
         </button>
       ) : (
         visible.map((incident) => {
+          const parsedIncident = getIncidentDisplay(incident);
           const elapsed = elapsedSeconds(incident.started_at);
           const currentLevel = getCurrentLevel(incident, elapsed);
           const incidentActionState = getActionState(incident.id);
           const levelClass = currentLevel.toLowerCase();
           const isSelectedRemoteTarget = selectedRemoteIncident?.id === incident.id;
+          const durationParts = formatHHMMSS(elapsed).split(":");
+          const startedAtClock = new Date(incident.started_at).toLocaleTimeString("fr-FR", {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            hour12: false,
+          });
           return (
             <section
               key={incident.id}
               className={`panel ${levelClass} ${isSelectedRemoteTarget ? "panel-selected" : ""}`}
             >
-              <AlertBanner
-                inline
-                severity={currentLevel}
-                passengerDone={incidentActionState.passengerAnnouncement.done}
-                onCallDone={incidentActionState.onCallContact.done}
-                onTogglePassenger={() => togglePassengerDone(incident.id)}
-                onToggleOnCall={() => toggleOnCallDone(incident.id)}
-              />
-              <div className="panel-main">
-                <h1>{incident.message}</h1>
-                <div className="started-at">Début: {formatDateTime(incident.started_at)}</div>
-                <div className="severity-word">{getSeverityLabel(currentLevel)}</div>
-                <div className="timer">{formatMMSS(elapsed)}</div>
+              <div className="panel-topbar">
+                <div className="panel-urgency">⚠ URGENCE</div>
+                <div className="panel-top-actions">
+                  <button
+                    type="button"
+                    data-remote-id="action-passenger"
+                    className={`panel-badge ${incidentActionState.passengerAnnouncement.done ? "is-done" : ""}`}
+                    onClick={() => togglePassengerDone(incident.id)}
+                  >
+                    {incidentActionState.passengerAnnouncement.done ? "✅ ANNONCE FAITE" : "🔔 ANNONCE VOYAGEUR"}
+                  </button>
+                  {currentLevel === "RED" && (
+                    <button
+                      type="button"
+                      data-remote-id="action-oncall"
+                      className={`panel-badge ${incidentActionState.onCallContact.done ? "is-done" : "is-critical"}`}
+                      onClick={() => toggleOnCallDone(incident.id)}
+                    >
+                      {incidentActionState.onCallContact.done ? "✅ ASTREINTE FAITE" : "🚨 ASTREINTE"}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="panel-close"
+                    onClick={() => void resolveIncident(incident.id)}
+                    disabled={busy}
+                    title="Résoudre l'incident"
+                  >
+                    ✕
+                  </button>
+                </div>
               </div>
+
+              <div className="panel-main">
+                <div className="panel-level-tag">{getSeverityLabel(currentLevel)}</div>
+                <h1>ALERTE - INCIDENT EN COURS</h1>
+                <div className="panel-line">Ligne : {parsedIncident.line ?? "NON DÉFINIE"}</div>
+                <div className="panel-incident-name">{parsedIncident.displayMessage}</div>
+                <div className="panel-started-time">Déclenché à {startedAtClock}</div>
+                <div className="panel-duration-wrap">
+                  <div className="panel-duration-title">Duree incident</div>
+                  <div className="panel-time-grid">
+                    <div className="panel-time-block">
+                      <span className="panel-time-value">{durationParts[0]}</span>
+                      <span className="panel-time-label">Heures</span>
+                    </div>
+                    <span className="panel-time-sep">:</span>
+                    <div className="panel-time-block">
+                      <span className="panel-time-value">{durationParts[1]}</span>
+                      <span className="panel-time-label">Minutes</span>
+                    </div>
+                    <span className="panel-time-sep">:</span>
+                    <div className="panel-time-block">
+                      <span className="panel-time-value">{durationParts[2]}</span>
+                      <span className="panel-time-label">Secondes</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <div className="panel-actions">
                 {currentLevel === "GREEN" && (
                   <button
@@ -765,7 +885,7 @@ export default function App() {
         canResolve={Boolean(selectedRemoteIncident)}
         targetIncidentLabel={
           selectedRemoteIncident
-            ? `#${selectedRemoteIncident.id} — ${selectedRemoteIncident.message}`
+            ? `#${selectedRemoteIncident.id} — Ligne: ${selectedRemoteIncidentParsed?.line ?? "N/A"} — ${selectedRemoteIncidentParsed?.displayMessage ?? selectedRemoteIncident.message}`
             : "Aucun incident"
         }
         onSelectPreviousIncident={selectPreviousIncident}
@@ -784,7 +904,7 @@ export default function App() {
 
       {showChooser && (
         <div className="modal-overlay" onClick={() => setShowChooser(false)}>
-          <div className="modal" onClick={(event) => event.stopPropagation()}>
+          <div className="modal chooser-modal" onClick={(event) => event.stopPropagation()}>
             <h2>Choisir un incident</h2>
             <div className="level-select">
               <button
@@ -809,6 +929,21 @@ export default function App() {
                 Départ Critique
               </button>
             </div>
+            <label className="incident-line-field">
+              <span>Ligne concernée</span>
+              <select
+                value={selectedIncidentLine}
+                onChange={(event) => setSelectedIncidentLine(event.target.value as "" | IncidentLine)}
+                disabled={busy}
+              >
+                <option value="">Choisir une ligne...</option>
+                {INCIDENT_LINES.map((line) => (
+                  <option key={line} value={line}>
+                    {line}
+                  </option>
+                ))}
+              </select>
+            </label>
             <textarea
               className="custom-input"
               rows={3}
@@ -817,16 +952,25 @@ export default function App() {
               onChange={(event) => setCustomMessage(event.target.value)}
               placeholder="Entrer un nouvel incident..."
             />
-            <button className="custom-start-btn" onClick={addIncidentChoice} disabled={busy}>
-              Ajouter à la liste
-            </button>
+            <div className="custom-action-row">
+              <button className="custom-start-btn" onClick={addIncidentChoice} disabled={busy}>
+                Ajouter à la liste
+              </button>
+              <button
+                className="custom-launch-btn"
+                onClick={() => void startIncident(customMessage, selectedStartLevel, selectedIncidentLine)}
+                disabled={busy || customMessage.trim().length === 0 || !selectedIncidentLine}
+              >
+                Démarrer incident
+              </button>
+            </div>
             <div className="choice-list">
               {incidentChoices.map((choice) => (
                 <div key={choice} className="choice-row">
                   <button
                     className="choice-btn"
-                    onClick={() => void startIncident(choice, selectedStartLevel)}
-                    disabled={busy}
+                    onClick={() => void startIncident(choice, selectedStartLevel, selectedIncidentLine)}
+                    disabled={busy || !selectedIncidentLine}
                   >
                     {choice}
                   </button>
@@ -897,6 +1041,17 @@ export default function App() {
                     ))}
                   </select>
                 </label>
+                <label className="history-field">
+                  <span>Ligne</span>
+                  <select value={historyLine} onChange={(event) => setHistoryLine(event.target.value as "" | (typeof INCIDENT_LINES)[number])}>
+                    <option value="">Toutes lignes</option>
+                    {INCIDENT_LINES.map((line) => (
+                      <option key={line} value={line}>
+                        {line}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <label className="history-field history-field-wide">
                   <span>Recherche incident</span>
                   <input
@@ -945,6 +1100,7 @@ export default function App() {
                 <table className="history-table">
                   <thead>
                     <tr>
+                      <th>Ligne</th>
                       <th>Incident</th>
                       <th>Gravité max</th>
                       <th>Début</th>
@@ -955,18 +1111,22 @@ export default function App() {
                   <tbody>
                     {historyItems.length === 0 ? (
                       <tr>
-                        <td colSpan={5}>Aucun incident résolu</td>
+                        <td colSpan={6}>Aucun incident résolu</td>
                       </tr>
                     ) : (
-                      historyItems.map((item) => (
-                        <tr key={item.id}>
-                          <td>{item.message}</td>
-                          <td>{getSeverityLabel(item.max_level_reached)}</td>
-                          <td>{formatDateTime(item.started_at)}</td>
-                          <td>{formatDateTime(item.resolved_at)}</td>
-                          <td>{formatDuration(item.duration_seconds)}</td>
-                        </tr>
-                      ))
+                      historyItems.map((item) => {
+                        const parsed = parseIncidentLine(item.message);
+                        return (
+                          <tr key={item.id}>
+                            <td>{item.line ?? parsed.line ?? "-"}</td>
+                            <td>{parsed.displayMessage}</td>
+                            <td>{getSeverityLabel(item.max_level_reached)}</td>
+                            <td>{formatDateTime(item.started_at)}</td>
+                            <td>{formatDateTime(item.resolved_at)}</td>
+                            <td>{formatDuration(item.duration_seconds)}</td>
+                          </tr>
+                        );
+                      })
                     )}
                   </tbody>
                 </table>
