@@ -1,4 +1,4 @@
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.orm import Session
@@ -15,13 +15,12 @@ LEVEL_ORDER = {
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now()
 
 
 def _as_utc(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+    # On s'assure juste que la date n'a plus de notion de fuseau horaire
+    return value.replace(tzinfo=None)
 
 
 def _max_level(level_a: IncidentLevel, level_b: IncidentLevel) -> IncidentLevel:
@@ -67,7 +66,7 @@ def create_incident(db: Session, message: str, start_level: IncidentLevel, line:
         status=IncidentStatus.ACTIVE,
         start_level=start_level,
         max_level_reached=start_level,
-        notification_level_sent=0,
+      
     )
     db.add(incident)
     db.commit()

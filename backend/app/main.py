@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import Base, engine, get_db
-from app import models  # noqa: F401
+from app import models  # noqa: F401 pour que SQLAlchemy enregistre les modèles
 from app.models import IncidentStatus
 from app.schemas import HistoryResponse, IncidentCreate, IncidentResponse
 from app.services import (
@@ -21,6 +21,7 @@ from app.websocket_manager import ws_manager
 
 app = FastAPI(title="PCC Incident Timer API", version="1.0.0")
 
+# Middleware CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -30,17 +31,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
+# Crée les tables au démarrage
 @app.on_event("startup")
 def startup():
+    # Crée toutes les tables définies via Base
     Base.metadata.create_all(bind=engine)
+    print("✅ Tables créées ou déjà existantes")
 
-
+# Health check
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
-
+# Création d'un incident
 @app.post("/api/incidents", response_model=IncidentResponse)
 async def create_incident_endpoint(payload: IncidentCreate, db: Session = Depends(get_db)):
     incident = create_incident(db, payload.message, payload.start_level, payload.line)
@@ -48,45 +51,42 @@ async def create_incident_endpoint(payload: IncidentCreate, db: Session = Depend
     await ws_manager.broadcast("incident_created", {"incident": data})
     return incident
 
-
+# Liste des incidents actifs
 @app.get("/api/incidents/active", response_model=list[IncidentResponse])
 def list_active_incidents(db: Session = Depends(get_db)):
     return get_active_incidents(db)
 
-
+# Résolution d'un incident
 @app.post("/api/incidents/{incident_id}/resolve", response_model=IncidentResponse)
 async def resolve_incident_endpoint(incident_id: int, db: Session = Depends(get_db)):
     incident = resolve_incident(db, incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Active incident not found")
-
     data = IncidentResponse.model_validate(incident).model_dump(mode="json")
     await ws_manager.broadcast("incident_resolved", {"incident": data})
     return incident
 
-
+# Forcer un incident en rouge
 @app.post("/api/incidents/{incident_id}/force-red", response_model=IncidentResponse)
 async def force_incident_red_endpoint(incident_id: int, db: Session = Depends(get_db)):
     incident = force_incident_red(db, incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Active incident not found")
-
     data = IncidentResponse.model_validate(incident).model_dump(mode="json")
     await ws_manager.broadcast("incident_updated", {"incident": data})
     return incident
 
-
+# Forcer un incident en orange
 @app.post("/api/incidents/{incident_id}/force-orange", response_model=IncidentResponse)
 async def force_incident_orange_endpoint(incident_id: int, db: Session = Depends(get_db)):
     incident = force_incident_orange(db, incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Active incident not found")
-
     data = IncidentResponse.model_validate(incident).model_dump(mode="json")
     await ws_manager.broadcast("incident_updated", {"incident": data})
     return incident
 
-
+# Historique des incidents
 @app.get("/api/incidents/history", response_model=HistoryResponse)
 def get_incidents_history(
     status: IncidentStatus | None = Query(default=None),
@@ -103,7 +103,7 @@ def get_incidents_history(
     items, total = get_history(db, status, from_, to, incident, incident_type, line, severity, limit, offset)
     return HistoryResponse(items=items, total=total, limit=limit, offset=offset)
 
-
+# WebSocket
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await ws_manager.connect(websocket)

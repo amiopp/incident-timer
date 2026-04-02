@@ -1,7 +1,10 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import RemoteActionBar from "./components/RemoteActionBar";
-import { type RemoteMode, useRemoteNavigation } from "./hooks/useRemoteNavigation";
+import {
+  type RemoteMode,
+  useRemoteNavigation,
+} from "./hooks/useRemoteNavigation";
 import {
   type IncidentActionState,
   type IncidentAuditEvent,
@@ -31,7 +34,8 @@ type HistoryResponse = {
   offset: number;
 };
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
 const INCIDENT_CHOICES_STORAGE_KEY = "pcc_incident_choices_v1";
 const INCIDENT_ACTIONS_STORAGE_KEY = "pcc_incident_actions_v1";
@@ -60,9 +64,29 @@ function formatHHMMSS(total: number) {
   const ss = (total % 60).toString().padStart(2, "0");
   return `${hh}:${mm}:${ss}`;
 }
+function forceUTC(dateString: string | null) {
+  if (!dateString) return null;
+  // Si la chaîne n'a pas de fuseau horaire ("Z" ou "+00:00"), on lui ajoute "Z" pour forcer l'UTC
+  return dateString.endsWith("Z") || dateString.includes("+")
+    ? dateString
+    : dateString + "Z";
+}
 
 function elapsedSeconds(startedAt: string) {
-  return Math.max(0, Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000));
+  if (!startedAt) return 0;
+  
+  // 1. On nettoie la chaîne (on enlève le Z s'il y en a un et les microsecondes)
+  const cleanString = startedAt.replace("Z", "").split(".")[0];
+  const [datePart, timePart] = cleanString.split("T");
+  const [year, month, day] = datePart.split("-").map(Number);
+  const [hour, minute, second] = timePart.split(":").map(Number);
+
+  // 2. new Date(année, mois, jour, heure, minute, seconde) force la lecture en heure locale
+  // Attention : le mois commence à 0 en Javascript, d'où le (month - 1)
+  const localTime = new Date(year, month - 1, day, hour, minute, second).getTime();
+
+  // 3. On calcule la différence
+  return Math.max(0, Math.floor((Date.now() - localTime) / 1000));
 }
 
 function getCurrentLevel(incident: ApiIncident, elapsed: number): Severity {
@@ -81,7 +105,15 @@ function getSeverityLabel(level: Severity) {
 
 function formatDateTime(value: string | null) {
   if (!value) return "-";
-  return new Date(value).toLocaleString("fr-FR", {
+  
+  const cleanString = value.replace("Z", "").split(".")[0];
+  const [datePart, timePart] = cleanString.split("T");
+  const [year, month, day] = datePart.split("-").map(Number);
+  const [hour, minute, second] = timePart.split(":").map(Number);
+
+  const localDate = new Date(year, month - 1, day, hour, minute, second);
+
+  return localDate.toLocaleString("fr-FR", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -119,7 +151,9 @@ function escapeCsv(value: string) {
 function parseIncidentLine(message: string) {
   const match = message.match(INCIDENT_LINE_PREFIX_PATTERN);
   const line = match?.[1]?.toUpperCase() ?? null;
-  const displayMessage = message.replace(INCIDENT_LINE_PREFIX_PATTERN, "").trim();
+  const displayMessage = message
+    .replace(INCIDENT_LINE_PREFIX_PATTERN, "")
+    .trim();
   return { line, displayMessage };
 }
 
@@ -136,15 +170,66 @@ function getIncidentDisplay(incident: ApiIncident) {
   };
 }
 
+function playAlertSound(level: Severity) {
+  try {
+    const AudioContext =
+      window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContext) return;
+
+    const audioCtx = new AudioContext();
+
+    const playChime = (
+      freqs: number[],
+      type: OscillatorType,
+      staggerMs: number,
+    ) => {
+      freqs.forEach((freq, index) => {
+        const osc = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        osc.type = type;
+
+        const startTime = audioCtx.currentTime + index * staggerMs;
+        osc.frequency.setValueAtTime(freq, startTime);
+
+        // Attack doux, sustain court, release long (comme un carillon/gong d'aéroport)
+        gainNode.gain.setValueAtTime(0, startTime);
+        gainNode.gain.linearRampToValueAtTime(0.5, startTime + 0.05); // Attack
+        gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + 0.6); // Fade-out
+
+        osc.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+
+        osc.start(startTime);
+        osc.stop(startTime + 0.65);
+      });
+    };
+
+    if (level === "ORANGE") {
+      // 2 Carillons clairs et nets "Gong" d'annonce standard
+      playChime([523.25, 440.0], "sine", 0.3); // Note Do(C5) puis La(A4)
+    } else if (level === "RED") {
+      // 3 Carillons plus intenses, percutants et clairs
+      playChime([659.25, 659.25, 659.25], "triangle", 0.25); // 3x Mi(E5) répétés
+    }
+  } catch (e) {
+    console.error("Audio playback failed", e);
+  }
+}
+
 export default function App() {
   const [incidents, setIncidents] = useState<ApiIncident[]>([]);
   const [nowTick, setNowTick] = useState(0);
   const [busy, setBusy] = useState(false);
   const [showChooser, setShowChooser] = useState(false);
   const [customMessage, setCustomMessage] = useState("");
-  const [selectedIncidentLine, setSelectedIncidentLine] = useState<"" | IncidentLine>("");
-  const [selectedStartLevel, setSelectedStartLevel] = useState<"GREEN" | "ORANGE" | "RED">("GREEN");
-  const [incidentChoices, setIncidentChoices] = useState<string[]>(INCIDENT_CHOICES);
+  const [selectedIncidentLine, setSelectedIncidentLine] = useState<
+    "" | IncidentLine
+  >("");
+  const [selectedStartLevel, setSelectedStartLevel] = useState<
+    "GREEN" | "ORANGE" | "RED"
+  >("GREEN");
+  const [incidentChoices, setIncidentChoices] =
+    useState<string[]>(INCIDENT_CHOICES);
   const [error, setError] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [historyItems, setHistoryItems] = useState<ApiIncident[]>([]);
@@ -154,11 +239,19 @@ export default function App() {
   const [historyTo, setHistoryTo] = useState("");
   const [historyIncident, setHistoryIncident] = useState("");
   const [historyType, setHistoryType] = useState("");
-  const [historyLine, setHistoryLine] = useState<"" | (typeof INCIDENT_LINES)[number]>("");
-  const [historySeverity, setHistorySeverity] = useState<"" | "GREEN" | "ORANGE" | "RED">("");
+  const [historyLine, setHistoryLine] = useState<
+    "" | (typeof INCIDENT_LINES)[number]
+  >("");
+  const [historySeverity, setHistorySeverity] = useState<
+    "" | "GREEN" | "ORANGE" | "RED"
+  >("");
   const [remoteMode, setRemoteMode] = useState<RemoteMode>("direct");
-  const [selectedRemoteIncidentId, setSelectedRemoteIncidentId] = useState<number | null>(null);
-  const [actionStateByIncident, setActionStateByIncident] = useState<Record<number, IncidentActionState>>({});
+  const [selectedRemoteIncidentId, setSelectedRemoteIncidentId] = useState<
+    number | null
+  >(null);
+  const [actionStateByIncident, setActionStateByIncident] = useState<
+    Record<number, IncidentActionState>
+  >({});
   const [auditHistory, setAuditHistory] = useState<IncidentAuditEvent[]>([]);
   const severityRefByIncident = useRef<Record<number, Severity>>({});
   const actionStateRef = useRef<Record<number, IncidentActionState>>({});
@@ -166,8 +259,12 @@ export default function App() {
   const visible = useMemo(() => incidents, [incidents]);
   const primaryIncident = visible[0] ?? null;
   const selectedRemoteIncident =
-    visible.find((incident) => incident.id === selectedRemoteIncidentId) ?? primaryIncident ?? null;
-  const selectedRemoteIncidentParsed = selectedRemoteIncident ? getIncidentDisplay(selectedRemoteIncident) : null;
+    visible.find((incident) => incident.id === selectedRemoteIncidentId) ??
+    primaryIncident ??
+    null;
+  const selectedRemoteIncidentParsed = selectedRemoteIncident
+    ? getIncidentDisplay(selectedRemoteIncident)
+    : null;
 
   useEffect(() => {
     if (visible.length === 0) {
@@ -175,7 +272,9 @@ export default function App() {
       return;
     }
 
-    const hasSelected = selectedRemoteIncidentId !== null && visible.some((item) => item.id === selectedRemoteIncidentId);
+    const hasSelected =
+      selectedRemoteIncidentId !== null &&
+      visible.some((item) => item.id === selectedRemoteIncidentId);
     if (!hasSelected) {
       setSelectedRemoteIncidentId(visible[0].id);
     }
@@ -201,14 +300,22 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem(INCIDENT_CHOICES_STORAGE_KEY, JSON.stringify(incidentChoices));
+    window.localStorage.setItem(
+      INCIDENT_CHOICES_STORAGE_KEY,
+      JSON.stringify(incidentChoices),
+    );
   }, [incidentChoices]);
 
   useEffect(() => {
     try {
-      const rawActions = window.localStorage.getItem(INCIDENT_ACTIONS_STORAGE_KEY);
+      const rawActions = window.localStorage.getItem(
+        INCIDENT_ACTIONS_STORAGE_KEY,
+      );
       if (rawActions) {
-        const parsed = JSON.parse(rawActions) as Record<number, IncidentActionState>;
+        const parsed = JSON.parse(rawActions) as Record<
+          number,
+          IncidentActionState
+        >;
         setActionStateByIncident(parsed);
       }
       const rawAudit = window.localStorage.getItem(INCIDENT_AUDIT_STORAGE_KEY);
@@ -223,11 +330,17 @@ export default function App() {
 
   useEffect(() => {
     actionStateRef.current = actionStateByIncident;
-    window.localStorage.setItem(INCIDENT_ACTIONS_STORAGE_KEY, JSON.stringify(actionStateByIncident));
+    window.localStorage.setItem(
+      INCIDENT_ACTIONS_STORAGE_KEY,
+      JSON.stringify(actionStateByIncident),
+    );
   }, [actionStateByIncident]);
 
   useEffect(() => {
-    window.localStorage.setItem(INCIDENT_AUDIT_STORAGE_KEY, JSON.stringify(auditHistory));
+    window.localStorage.setItem(
+      INCIDENT_AUDIT_STORAGE_KEY,
+      JSON.stringify(auditHistory),
+    );
   }, [auditHistory]);
 
   function pushAuditEvent(event: Omit<IncidentAuditEvent, "id">) {
@@ -284,7 +397,9 @@ export default function App() {
     pushAuditEvent({
       incidentId,
       timestamp: new Date().toISOString(),
-      type: getActionState(incidentId).onCallContact.done ? "ON_CALL_CONTACT_RESET" : "ON_CALL_CONTACT_DONE",
+      type: getActionState(incidentId).onCallContact.done
+        ? "ON_CALL_CONTACT_RESET"
+        : "ON_CALL_CONTACT_DONE",
       doneBy: "OPÉRATEUR PCC",
     });
   }
@@ -333,14 +448,18 @@ export default function App() {
         params.set("severity", filters.severity);
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/incidents/history?${params.toString()}`);
+      const response = await fetch(
+        `${API_BASE_URL}/api/incidents/history?${params.toString()}`,
+      );
       if (!response.ok) {
         throw new Error("Failed to load history");
       }
       const payload = (await response.json()) as HistoryResponse;
       const lineFilter = filters?.line ?? "";
       const filteredItems = lineFilter
-        ? payload.items.filter((item) => getIncidentDisplay(item).line === lineFilter)
+        ? payload.items.filter(
+            (item) => getIncidentDisplay(item).line === lineFilter,
+          )
         : payload.items;
       setHistoryItems(filteredItems);
     } catch {
@@ -439,18 +558,26 @@ export default function App() {
   }
 
   function exportHistoryCsv() {
-    const headers = ["ligne", "incident", "debut", "resolution", "duree", "statut", "niveau_max"];
+    const headers = [
+      "ligne",
+      "incident",
+      "debut",
+      "resolution",
+      "duree",
+      "statut",
+      "niveau_max",
+    ];
     const rows = historyItems.map((item) => {
-        const parsed = getIncidentDisplay(item);
+      const parsed = getIncidentDisplay(item);
       return [
-          parsed.line ?? "",
-          parsed.displayMessage,
-          item.started_at,
-          item.resolved_at ?? "",
-          formatDuration(item.duration_seconds),
-          item.status,
-          item.max_level_reached,
-        ];
+        parsed.line ?? "",
+        parsed.displayMessage,
+        item.started_at,
+        item.resolved_at ?? "",
+        formatDuration(item.duration_seconds),
+        item.status,
+        item.max_level_reached,
+      ];
     });
 
     const csv = [headers, ...rows]
@@ -490,7 +617,11 @@ export default function App() {
       const response = await fetch(`${API_BASE_URL}/api/incidents`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: finalMessage, start_level: startLevel, line }),
+        body: JSON.stringify({
+          message: finalMessage,
+          start_level: startLevel,
+          line,
+        }),
       });
       if (!response.ok) {
         throw new Error("Failed to create incident");
@@ -519,7 +650,9 @@ export default function App() {
       setError("Le texte de l'incident est obligatoire");
       return;
     }
-    if (incidentChoices.some((item) => item.toLowerCase() === value.toLowerCase())) {
+    if (
+      incidentChoices.some((item) => item.toLowerCase() === value.toLowerCase())
+    ) {
       setError("Cet incident existe déjà dans la liste");
       return;
     }
@@ -538,9 +671,12 @@ export default function App() {
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/incidents/${id}/resolve`, {
-        method: "POST",
-      });
+      const response = await fetch(
+        `${API_BASE_URL}/api/incidents/${id}/resolve`,
+        {
+          method: "POST",
+        },
+      );
       if (!response.ok) {
         throw new Error("Failed to resolve incident");
       }
@@ -563,9 +699,12 @@ export default function App() {
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/incidents/${id}/force-red`, {
-        method: "POST",
-      });
+      const response = await fetch(
+        `${API_BASE_URL}/api/incidents/${id}/force-red`,
+        {
+          method: "POST",
+        },
+      );
       if (!response.ok) {
         throw new Error("Failed to force red");
       }
@@ -589,9 +728,12 @@ export default function App() {
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/incidents/${id}/force-orange`, {
-        method: "POST",
-      });
+      const response = await fetch(
+        `${API_BASE_URL}/api/incidents/${id}/force-orange`,
+        {
+          method: "POST",
+        },
+      );
       if (!response.ok) {
         throw new Error("Failed to force orange");
       }
@@ -611,7 +753,9 @@ export default function App() {
   }
 
   useEffect(() => {
-    void fetchActive().catch(() => setError("Impossible de charger les incidents"));
+    void fetchActive().catch(() =>
+      setError("Impossible de charger les incidents"),
+    );
   }, []);
 
   useEffect(() => {
@@ -632,13 +776,17 @@ export default function App() {
     };
 
     ws.onmessage = () => {
-      void fetchActive().catch(() => setError("Impossible de charger les incidents"));
+      void fetchActive().catch(() =>
+        setError("Impossible de charger les incidents"),
+      );
     };
 
     ws.onerror = () => {
       if (pollingId === undefined) {
         pollingId = window.setInterval(() => {
-          void fetchActive().catch(() => setError("Impossible de charger les incidents"));
+          void fetchActive().catch(() =>
+            setError("Impossible de charger les incidents"),
+          );
         }, 5000);
       }
     };
@@ -646,7 +794,9 @@ export default function App() {
     ws.onclose = () => {
       if (pollingId === undefined) {
         pollingId = window.setInterval(() => {
-          void fetchActive().catch(() => setError("Impossible de charger les incidents"));
+          void fetchActive().catch(() =>
+            setError("Impossible de charger les incidents"),
+          );
         }, 5000);
       }
     };
@@ -663,7 +813,10 @@ export default function App() {
     const nextByIncident: Record<number, Severity> = {};
 
     for (const incident of visible) {
-      const severity = getCurrentLevel(incident, elapsedSeconds(incident.started_at));
+      const severity = getCurrentLevel(
+        incident,
+        elapsedSeconds(incident.started_at),
+      );
       nextByIncident[incident.id] = severity;
 
       const previousSeverity = severityRefByIncident.current[incident.id];
@@ -674,6 +827,9 @@ export default function App() {
           type: "SEVERITY_CHANGED",
           severity,
         });
+
+        // Jouer un son d'alerte lors du changement de niveau
+        playAlertSound(severity);
       }
     }
 
@@ -700,7 +856,9 @@ export default function App() {
 
     const elapsed = elapsedSeconds(selectedRemoteIncident.started_at);
     const severity = getCurrentLevel(selectedRemoteIncident, elapsed);
-    const actionState = actionStateRef.current[selectedRemoteIncident.id] ?? createDefaultActionState();
+    const actionState =
+      actionStateRef.current[selectedRemoteIncident.id] ??
+      createDefaultActionState();
 
     if (!actionState.passengerAnnouncement.done) {
       togglePassengerDone(selectedRemoteIncident.id);
@@ -719,14 +877,18 @@ export default function App() {
 
   function selectPreviousIncident() {
     if (visible.length <= 1 || !selectedRemoteIncident) return;
-    const currentIndex = visible.findIndex((item) => item.id === selectedRemoteIncident.id);
+    const currentIndex = visible.findIndex(
+      (item) => item.id === selectedRemoteIncident.id,
+    );
     const nextIndex = (currentIndex - 1 + visible.length) % visible.length;
     setSelectedRemoteIncidentId(visible[nextIndex].id);
   }
 
   function selectNextIncident() {
     if (visible.length <= 1 || !selectedRemoteIncident) return;
-    const currentIndex = visible.findIndex((item) => item.id === selectedRemoteIncident.id);
+    const currentIndex = visible.findIndex(
+      (item) => item.id === selectedRemoteIncident.id,
+    );
     const nextIndex = (currentIndex + 1) % visible.length;
     setSelectedRemoteIncidentId(visible[nextIndex].id);
   }
@@ -756,17 +918,31 @@ export default function App() {
   return (
     <div className={`screen ${visible.length >= 2 ? "split" : "single"}`}>
       <div className="toolbar">
-        <button data-remote-id="toolbar-add" className="add-btn" onClick={() => setShowChooser(true)} disabled={busy}>
+        <button
+          data-remote-id="toolbar-add"
+          className="add-btn"
+          onClick={() => setShowChooser(true)}
+          disabled={busy}
+        >
           + Ajouter incident
         </button>
-        <button data-remote-id="toolbar-history" className="history-btn" onClick={openHistory} disabled={busy}>
+        <button
+          data-remote-id="toolbar-history"
+          className="history-btn"
+          onClick={openHistory}
+          disabled={busy}
+        >
           Historique
         </button>
         {error && <div className="error-msg">{error}</div>}
       </div>
 
       {visible.length === 0 ? (
-        <button className="start-btn" onClick={() => setShowChooser(true)} disabled={busy}>
+        <button
+          className="start-btn"
+          onClick={() => setShowChooser(true)}
+          disabled={busy}
+        >
           {busy ? (
             <span className="start-btn-label">DÉMARRAGE...</span>
           ) : (
@@ -785,73 +961,85 @@ export default function App() {
           const currentLevel = getCurrentLevel(incident, elapsed);
           const incidentActionState = getActionState(incident.id);
           const levelClass = currentLevel.toLowerCase();
-          const isSelectedRemoteTarget = selectedRemoteIncident?.id === incident.id;
+          const isSelectedRemoteTarget =
+            selectedRemoteIncident?.id === incident.id;
           const durationParts = formatHHMMSS(elapsed).split(":");
-          const startedAtClock = new Date(incident.started_at).toLocaleTimeString("fr-FR", {
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-            hour12: false,
-          });
+          const utcStartedAt = forceUTC(incident.started_at);
+          const startedAtClock = utcStartedAt
+            ? new Date(utcStartedAt).toLocaleTimeString("fr-FR", {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+                hour12: false,
+              })
+            : "-";
           return (
             <section
               key={incident.id}
               className={`panel ${levelClass} ${isSelectedRemoteTarget ? "panel-selected" : ""}`}
             >
               <div className="panel-topbar">
-                <div className="panel-urgency">⚠ URGENCE</div>
-                <div className="panel-top-actions">
+                <div className="panel-notifications">
                   <button
                     type="button"
                     data-remote-id="action-passenger"
-                    className={`panel-badge ${incidentActionState.passengerAnnouncement.done ? "is-done" : ""}`}
+                    className={`panel-badge ${incidentActionState.passengerAnnouncement.done ? "is-done" : "is-blinking"}`}
                     onClick={() => togglePassengerDone(incident.id)}
                   >
-                    {incidentActionState.passengerAnnouncement.done ? "✅ ANNONCE FAITE" : "🔔 ANNONCE VOYAGEUR"}
+                    {incidentActionState.passengerAnnouncement.done
+                      ? "✅ ANNONCE FAITE"
+                      : "⚠️ ANNONCE VOYAGEUR REQUISE"}
                   </button>
                   {currentLevel === "RED" && (
                     <button
                       type="button"
                       data-remote-id="action-oncall"
-                      className={`panel-badge ${incidentActionState.onCallContact.done ? "is-done" : "is-critical"}`}
+                      className={`panel-badge ${incidentActionState.onCallContact.done ? "is-done" : "is-critical is-blinking"}`}
                       onClick={() => toggleOnCallDone(incident.id)}
                     >
-                      {incidentActionState.onCallContact.done ? "✅ ASTREINTE FAITE" : "🚨 ASTREINTE"}
+                      {incidentActionState.onCallContact.done
+                        ? "✅ ASTREINTE FAITE"
+                        : "🚨 ASTREINTE REQUISE CRITIQUE"}
                     </button>
                   )}
-                  <button
-                    type="button"
-                    className="panel-close"
-                    onClick={() => void resolveIncident(incident.id)}
-                    disabled={busy}
-                    title="Résoudre l'incident"
-                  >
-                    ✕
-                  </button>
                 </div>
               </div>
 
               <div className="panel-main">
-                <div className="panel-level-tag">{getSeverityLabel(currentLevel)}</div>
+                <div className="panel-level-tag">
+                  {getSeverityLabel(currentLevel)}
+                </div>
                 <h1>ALERTE - INCIDENT EN COURS</h1>
-                <div className="panel-line">Ligne : {parsedIncident.line ?? "NON DÉFINIE"}</div>
-                <div className="panel-incident-name">{parsedIncident.displayMessage}</div>
-                <div className="panel-started-time">Déclenché à {startedAtClock}</div>
+                <div className="panel-line">
+                  Ligne : {parsedIncident.line ?? "NON DÉFINIE"}
+                </div>
+                <div className="panel-incident-name">
+                  {parsedIncident.displayMessage}
+                </div>
+                <div className="panel-started-time">
+                  Déclenché à {startedAtClock}
+                </div>
                 <div className="panel-duration-wrap">
                   <div className="panel-duration-title">Duree incident</div>
                   <div className="panel-time-grid">
                     <div className="panel-time-block">
-                      <span className="panel-time-value">{durationParts[0]}</span>
+                      <span className="panel-time-value">
+                        {durationParts[0]}
+                      </span>
                       <span className="panel-time-label">Heures</span>
                     </div>
                     <span className="panel-time-sep">:</span>
                     <div className="panel-time-block">
-                      <span className="panel-time-value">{durationParts[1]}</span>
+                      <span className="panel-time-value">
+                        {durationParts[1]}
+                      </span>
                       <span className="panel-time-label">Minutes</span>
                     </div>
                     <span className="panel-time-sep">:</span>
                     <div className="panel-time-block">
-                      <span className="panel-time-value">{durationParts[2]}</span>
+                      <span className="panel-time-value">
+                        {durationParts[2]}
+                      </span>
                       <span className="panel-time-label">Secondes</span>
                     </div>
                   </div>
@@ -869,7 +1057,11 @@ export default function App() {
                   </button>
                 )}
                 {currentLevel !== "RED" && (
-                  <button className="force-red-btn" onClick={() => void forceRedIncident(incident.id)} disabled={busy}>
+                  <button
+                    className="force-red-btn"
+                    onClick={() => void forceRedIncident(incident.id)}
+                    disabled={busy}
+                  >
                     {busy ? "..." : "Passer en critique"}
                   </button>
                 )}
@@ -890,7 +1082,9 @@ export default function App() {
         }
         onSelectPreviousIncident={selectPreviousIncident}
         onSelectNextIncident={selectNextIncident}
-        onToggleMode={() => setRemoteMode((prev) => (prev === "direct" ? "navigation" : "direct"))}
+        onToggleMode={() =>
+          setRemoteMode((prev) => (prev === "direct" ? "navigation" : "direct"))
+        }
         onPassengerAction={() => {
           if (!selectedRemoteIncident) return;
           togglePassengerDone(selectedRemoteIncident.id);
@@ -904,7 +1098,10 @@ export default function App() {
 
       {showChooser && (
         <div className="modal-overlay" onClick={() => setShowChooser(false)}>
-          <div className="modal chooser-modal" onClick={(event) => event.stopPropagation()}>
+          <div
+            className="modal chooser-modal"
+            onClick={(event) => event.stopPropagation()}
+          >
             <h2>Choisir un incident</h2>
             <div className="level-select">
               <button
@@ -933,7 +1130,11 @@ export default function App() {
               <span>Ligne concernée</span>
               <select
                 value={selectedIncidentLine}
-                onChange={(event) => setSelectedIncidentLine(event.target.value as "" | IncidentLine)}
+                onChange={(event) =>
+                  setSelectedIncidentLine(
+                    event.target.value as "" | IncidentLine,
+                  )
+                }
                 disabled={busy}
               >
                 <option value="">Choisir une ligne...</option>
@@ -953,13 +1154,27 @@ export default function App() {
               placeholder="Entrer un nouvel incident..."
             />
             <div className="custom-action-row">
-              <button className="custom-start-btn" onClick={addIncidentChoice} disabled={busy}>
+              <button
+                className="custom-start-btn"
+                onClick={addIncidentChoice}
+                disabled={busy}
+              >
                 Ajouter à la liste
               </button>
               <button
                 className="custom-launch-btn"
-                onClick={() => void startIncident(customMessage, selectedStartLevel, selectedIncidentLine)}
-                disabled={busy || customMessage.trim().length === 0 || !selectedIncidentLine}
+                onClick={() =>
+                  void startIncident(
+                    customMessage,
+                    selectedStartLevel,
+                    selectedIncidentLine,
+                  )
+                }
+                disabled={
+                  busy ||
+                  customMessage.trim().length === 0 ||
+                  !selectedIncidentLine
+                }
               >
                 Démarrer incident
               </button>
@@ -969,7 +1184,13 @@ export default function App() {
                 <div key={choice} className="choice-row">
                   <button
                     className="choice-btn"
-                    onClick={() => void startIncident(choice, selectedStartLevel, selectedIncidentLine)}
+                    onClick={() =>
+                      void startIncident(
+                        choice,
+                        selectedStartLevel,
+                        selectedIncidentLine,
+                      )
+                    }
                     disabled={busy || !selectedIncidentLine}
                   >
                     {choice}
@@ -985,7 +1206,11 @@ export default function App() {
                 </div>
               ))}
             </div>
-            <button className="close-btn" onClick={() => setShowChooser(false)} disabled={busy}>
+            <button
+              className="close-btn"
+              onClick={() => setShowChooser(false)}
+              disabled={busy}
+            >
               Fermer
             </button>
           </div>
@@ -994,7 +1219,10 @@ export default function App() {
 
       {showHistory && (
         <div className="modal-overlay" onClick={() => setShowHistory(false)}>
-          <div className="modal history-modal" onClick={(event) => event.stopPropagation()}>
+          <div
+            className="modal history-modal"
+            onClick={(event) => event.stopPropagation()}
+          >
             <h2>Historique des incidents</h2>
             <form className="history-controls" onSubmit={submitHistoryFilters}>
               <div className="history-filters-grid">
@@ -1021,7 +1249,9 @@ export default function App() {
                   <select
                     value={historySeverity}
                     onChange={(event) =>
-                      setHistorySeverity(event.target.value as "" | "GREEN" | "ORANGE" | "RED")
+                      setHistorySeverity(
+                        event.target.value as "" | "GREEN" | "ORANGE" | "RED",
+                      )
                     }
                   >
                     <option value="">Toutes gravités</option>
@@ -1032,7 +1262,10 @@ export default function App() {
                 </label>
                 <label className="history-field">
                   <span>Type d'incident</span>
-                  <select value={historyType} onChange={(event) => setHistoryType(event.target.value)}>
+                  <select
+                    value={historyType}
+                    onChange={(event) => setHistoryType(event.target.value)}
+                  >
                     <option value="">Tous types</option>
                     {incidentChoices.map((choice) => (
                       <option key={choice} value={choice}>
@@ -1043,7 +1276,16 @@ export default function App() {
                 </label>
                 <label className="history-field">
                   <span>Ligne</span>
-                  <select value={historyLine} onChange={(event) => setHistoryLine(event.target.value as "" | (typeof INCIDENT_LINES)[number])}>
+                  <select
+                    value={historyLine}
+                    onChange={(event) =>
+                      setHistoryLine(
+                        event.target.value as
+                          | ""
+                          | (typeof INCIDENT_LINES)[number],
+                      )
+                    }
+                  >
                     <option value="">Toutes lignes</option>
                     {INCIDENT_LINES.map((line) => (
                       <option key={line} value={line}>
@@ -1065,35 +1307,60 @@ export default function App() {
               </div>
 
               <div className="history-filters-actions">
-              <button type="submit" className="filter-btn" disabled={historyLoading}>
-                Appliquer
-              </button>
-              <button type="button" className="filter-btn secondary" onClick={clearHistoryFilters} disabled={historyLoading}>
-                Réinitialiser
-              </button>
-              <button
-                type="button"
-                className="filter-btn success"
-                onClick={exportHistoryCsv}
-                disabled={historyLoading || historyItems.length === 0}
-              >
-                Exporter CSV
-              </button>
+                <button
+                  type="submit"
+                  className="filter-btn"
+                  disabled={historyLoading}
+                >
+                  Appliquer
+                </button>
+                <button
+                  type="button"
+                  className="filter-btn secondary"
+                  onClick={clearHistoryFilters}
+                  disabled={historyLoading}
+                >
+                  Réinitialiser
+                </button>
+                <button
+                  type="button"
+                  className="filter-btn success"
+                  onClick={exportHistoryCsv}
+                  disabled={historyLoading || historyItems.length === 0}
+                >
+                  Exporter CSV
+                </button>
               </div>
             </form>
             <div className="history-presets">
-              <button className="preset-btn" onClick={applyTodayPreset} disabled={historyLoading}>
+              <button
+                className="preset-btn"
+                onClick={applyTodayPreset}
+                disabled={historyLoading}
+              >
                 Aujourd'hui
               </button>
-              <button className="preset-btn" onClick={applyYesterdayPreset} disabled={historyLoading}>
+              <button
+                className="preset-btn"
+                onClick={applyYesterdayPreset}
+                disabled={historyLoading}
+              >
                 Hier
               </button>
-              <button className="preset-btn" onClick={applyThisWeekPreset} disabled={historyLoading}>
+              <button
+                className="preset-btn"
+                onClick={applyThisWeekPreset}
+                disabled={historyLoading}
+              >
                 Cette semaine
               </button>
             </div>
-            {historyLoading && <div className="history-state">Chargement...</div>}
-            {historyError && <div className="history-state error-text">{historyError}</div>}
+            {historyLoading && (
+              <div className="history-state">Chargement...</div>
+            )}
+            {historyError && (
+              <div className="history-state error-text">{historyError}</div>
+            )}
 
             {!historyLoading && !historyError && (
               <div className="history-table-wrap">
