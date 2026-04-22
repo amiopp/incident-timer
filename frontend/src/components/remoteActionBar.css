@@ -1,9 +1,6 @@
 .remote-action-bar {
-  position: fixed;
-  left: 50%;
-  bottom: 14px;
-  transform: translateX(-50%);
-  z-index: 45;
+  position: relative;
+  z-index: 1;
   width: min(1680px, calc(100vw - 20px));
   background: rgba(2, 6, 23, 0.88);
   border: 1px solid #475569;

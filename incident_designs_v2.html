@@ -1,0 +1,654 @@
+
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body, div { font-family: 'Segoe UI', system-ui, sans-serif; }
+
+.wrapper {
+  padding: 0;
+  background: transparent;
+}
+
+.tabs,
+.sel-bar {
+  display: none !important;
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+.tab {
+  padding: 8px 28px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 700;
+  border: 2px solid transparent;
+  cursor: pointer;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  transition: all 0.2s;
+}
+.tab.green  { background: #1b6b2f; color: #7dffaa; border-color: #2a9d4f; }
+.tab.orange { background: #7a3a00; color: #ffc86e; border-color: #c96a00; }
+.tab.red    { background: #6b1a1a; color: #ffa0a0; border-color: #c0392b; }
+.tab.active { outline: 3px solid white; }
+
+.screen { display: none; border-radius: 20px; overflow: hidden; }
+.screen.active { display: block; }
+
+/* ─── DESIGN A : Minimaliste centré ─── */
+.design-a {
+  min-height: 580px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 40px 80px;
+  position: relative;
+}
+.bg-mineur  { background: #1a5c2a; }
+.bg-modere  { background: #8b4000; }
+.bg-critique{ background: #7a0000; }
+
+.top-bar {
+  position: absolute; top: 0; left: 0; right: 0;
+  height: 6px;
+}
+.bar-mineur  { background: #4ade80; }
+.bar-modere  { background: #fb923c; }
+.bar-critique{ background: #f87171; }
+
+.pulse-ring {
+  width: 180px; height: 180px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 32px;
+  position: relative;
+}
+.pr-mineur  { background: rgba(74,222,128,0.15); border: 3px solid rgba(74,222,128,0.4); }
+.pr-modere  { background: rgba(251,146,60,0.15);  border: 3px solid rgba(251,146,60,0.4); }
+.pr-critique{ background: rgba(248,113,113,0.15); border: 3px solid rgba(248,113,113,0.4); }
+
+.line-circle-a {
+  width: 130px; height: 130px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 48px; font-weight: 900; color: white;
+}
+.line-diamond-a {
+  width: 100px; height: 100px;
+  transform: rotate(45deg);
+  border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+}
+.line-diamond-a span { transform: rotate(-45deg); font-size: 30px; font-weight: 900; color: white; display: block; }
+
+.station-a {
+  font-size: 20px; font-weight: 600; color: rgba(255,255,255,0.5);
+  text-transform: uppercase; letter-spacing: 0.08em;
+  margin-top: 12px; margin-bottom: 28px;
+}
+
+.incident-a {
+  font-size: 52px; font-weight: 900; color: #fff;
+  text-align: center; line-height: 1.1; margin-bottom: 10px;
+}
+
+.time-a {
+  font-size: 17px; color: rgba(255,255,255,0.45); margin-bottom: 44px;
+}
+.time-a b { color: rgba(255,255,255,0.75); font-weight: 700; }
+
+.timer-a {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 44px;
+}
+.tblock-a {
+  text-align: center;
+}
+.tval-a {
+  width: 110px; height: 100px; border-radius: 16px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 54px; font-weight: 900; color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+.tv-mineur  { background: rgba(255,255,255,0.1); border: 1px solid rgba(74,222,128,0.3); }
+.tv-modere  { background: rgba(255,255,255,0.1); border: 1px solid rgba(251,146,60,0.3); }
+.tv-critique{ background: rgba(255,255,255,0.1); border: 1px solid rgba(248,113,113,0.3); }
+.tsep-a { font-size: 44px; font-weight: 700; color: rgba(255,255,255,0.3); margin-bottom: 20px; }
+.tunit-a { font-size: 11px; font-weight: 700; letter-spacing: 0.1em; color: rgba(255,255,255,0.3); text-transform: uppercase; margin-top: 6px; }
+
+.btns-a { display: flex; gap: 16px; }
+.btn-a {
+  padding: 15px 44px; border-radius: 14px;
+  font-size: 16px; font-weight: 800;
+  border: none; cursor: pointer; text-transform: uppercase; letter-spacing: 0.06em;
+  transition: transform 0.1s, opacity 0.15s;
+}
+.btn-a:hover { opacity: 0.88; transform: scale(1.02); }
+.btn-a:active { transform: scale(0.97); }
+.btn-mod  { background: #fb923c; color: #3d1800; }
+.btn-crit { background: #f87171; color: #3d0000; }
+
+.severity-pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 7px 22px; border-radius: 999px;
+  font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em;
+  margin-bottom: 24px;
+}
+.sp-mineur  { background: rgba(74,222,128,0.2);  color: #4ade80; border: 1px solid rgba(74,222,128,0.4); }
+.sp-modere  { background: rgba(251,146,60,0.2);  color: #fb923c; border: 1px solid rgba(251,146,60,0.4); }
+.sp-critique{ background: rgba(248,113,113,0.2); color: #f87171; border: 1px solid rgba(248,113,113,0.4); }
+.sdot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+
+.announce {
+  position: absolute; top: 0; left: 0; right: 0;
+  padding: 11px; text-align: center;
+  font-size: 13px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+}
+.an-mineur  { background: rgba(0,0,0,0.25); color: #86efac; border-bottom: 1px solid rgba(74,222,128,0.2); }
+.an-modere  { background: rgba(0,0,0,0.25); color: #fdba74; border-bottom: 1px solid rgba(251,146,60,0.2); }
+.an-critique{ background: rgba(0,0,0,0.25); color: #fca5a5; border-bottom: 1px solid rgba(248,113,113,0.2); }
+
+.ann-icon { width: 16px; height: 16px; flex-shrink: 0; }
+
+/* ─── DESIGN B : Deux colonnes ─── */
+.design-b {
+  min-height: 580px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  position: relative;
+  overflow: hidden;
+}
+.col-left-b {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 60px 40px;
+  position: relative;
+}
+.divider-b {
+  width: 2px;
+  background: rgba(255,255,255,0.12);
+  position: absolute; left: 50%; top: 10%; bottom: 10%;
+}
+.col-right-b {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 60px 40px; gap: 24px;
+}
+
+.large-line-b {
+  width: 160px; height: 160px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 60px; font-weight: 900; color: white;
+  margin-bottom: 16px;
+}
+.large-diamond-b {
+  width: 130px; height: 130px;
+  transform: rotate(45deg); border-radius: 14px;
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 16px;
+}
+.large-diamond-b span { transform: rotate(-45deg); font-size: 36px; font-weight: 900; color: white; display: block; }
+
+.station-b {
+  font-size: 18px; font-weight: 600; color: rgba(255,255,255,0.45);
+  text-transform: uppercase; letter-spacing: 0.07em; text-align: center;
+}
+
+.label-b {
+  font-size: 12px; font-weight: 700; letter-spacing: 0.12em;
+  color: rgba(255,255,255,0.35); text-transform: uppercase; text-align: center;
+}
+.value-b {
+  font-size: 44px; font-weight: 900; color: #fff; text-align: center; line-height: 1;
+}
+
+.timer-row-b {
+  display: flex; gap: 10px; align-items: center;
+}
+.tblk-b { text-align: center; }
+.tv-b {
+  width: 90px; height: 88px; border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 46px; font-weight: 900; color: white;
+  font-variant-numeric: tabular-nums;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.12);
+}
+.tsep-b { font-size: 36px; color: rgba(255,255,255,0.25); font-weight: 700; margin-bottom: 18px; }
+.tu-b { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: rgba(255,255,255,0.3); text-transform: uppercase; margin-top: 5px; }
+
+.btns-b { display: flex; flex-direction: column; gap: 12px; width: 100%; }
+.btnb {
+  padding: 14px 24px; border-radius: 12px;
+  font-size: 15px; font-weight: 800; border: none; cursor: pointer;
+  text-transform: uppercase; letter-spacing: 0.05em; width: 100%;
+  transition: transform 0.1s, opacity 0.15s;
+}
+.btnb:hover { opacity: 0.88; transform: scale(1.01); }
+.btnb-mod  { background: #fb923c; color: #3d1800; }
+.btnb-crit { background: #f87171; color: #3d0000; }
+
+.top-stripe-b {
+  position: absolute; top: 0; left: 0; right: 0; height: 56px;
+  display: flex; align-items: center; padding: 0 32px;
+  justify-content: space-between;
+}
+.ts-mineur  { background: rgba(0,0,0,0.2); border-bottom: 1px solid rgba(74,222,128,0.2); }
+.ts-modere  { background: rgba(0,0,0,0.2); border-bottom: 1px solid rgba(251,146,60,0.2); }
+.ts-critique{ background: rgba(0,0,0,0.2); border-bottom: 1px solid rgba(248,113,113,0.2); }
+
+.ts-title { font-size: 13px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.55); }
+.ts-badge { display: flex; align-items: center; gap: 6px; padding: 5px 16px; border-radius: 999px; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.tsb-mineur  { background: rgba(74,222,128,0.2); color: #4ade80; border: 1px solid rgba(74,222,128,0.35); }
+.tsb-modere  { background: rgba(251,146,60,0.2); color: #fb923c; border: 1px solid rgba(251,146,60,0.35); }
+.tsb-critique{ background: rgba(248,113,113,0.2); color: #f87171; border: 1px solid rgba(248,113,113,0.35); }
+
+/* ─── DESIGN C : Tableau de bord ─── */
+.design-c {
+  min-height: 580px;
+  display: flex; flex-direction: column;
+  padding: 0;
+}
+.header-c {
+  padding: 20px 40px;
+  display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+.hc-left { display: flex; align-items: center; gap: 16px; }
+.hc-icon {
+  width: 48px; height: 48px; border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+}
+.hci-mineur  { background: rgba(74,222,128,0.2); }
+.hci-modere  { background: rgba(251,146,60,0.2); }
+.hci-critique{ background: rgba(248,113,113,0.2); }
+.hc-sub { font-size: 12px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; }
+.hcs-mineur  { color: #4ade80; }
+.hcs-modere  { color: #fb923c; }
+.hcs-critique{ color: #f87171; }
+.hc-title { font-size: 18px; font-weight: 800; color: white; margin-top: 2px; }
+.hc-right { display: flex; align-items: center; gap: 16px; }
+.hc-time { font-size: 14px; color: rgba(255,255,255,0.4); }
+.hc-time b { color: rgba(255,255,255,0.7); }
+
+.body-c {
+  flex: 1; display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 1px; background: rgba(255,255,255,0.08);
+}
+.cell-c {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 40px 24px; gap: 12px;
+}
+.cell-bg-mineur  { background: #1a5c2a; }
+.cell-bg-modere  { background: #8b4000; }
+.cell-bg-critique{ background: #7a0000; }
+.cell-bg-dark-mineur  { background: #163d1e; }
+.cell-bg-dark-modere  { background: #5c2a00; }
+.cell-bg-dark-critique{ background: #500000; }
+
+.cell-label-c { font-size: 11px; font-weight: 700; letter-spacing: 0.12em; color: rgba(255,255,255,0.35); text-transform: uppercase; }
+.cell-val-c { font-size: 38px; font-weight: 900; color: white; text-align: center; line-height: 1; }
+.cell-sub-c { font-size: 14px; color: rgba(255,255,255,0.45); text-align: center; }
+
+.timer-c { display: flex; align-items: center; gap: 8px; }
+.tv-c {
+  width: 80px; height: 76px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 40px; font-weight: 900; color: white;
+  font-variant-numeric: tabular-nums;
+  background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1);
+}
+.ts-c { font-size: 30px; color: rgba(255,255,255,0.25); font-weight: 700; margin-bottom: 14px; }
+.tu-c { font-size: 10px; color: rgba(255,255,255,0.3); font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; margin-top: 4px; text-align: center; }
+
+.footer-c {
+  padding: 16px 40px;
+  display: flex; align-items: center; justify-content: space-between;
+  border-top: 1px solid rgba(255,255,255,0.1);
+  gap: 16px;
+}
+.btns-c { display: flex; gap: 12px; }
+.btnc {
+  padding: 12px 36px; border-radius: 10px;
+  font-size: 14px; font-weight: 800; border: none; cursor: pointer;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  transition: transform 0.1s, opacity 0.15s;
+}
+.btnc:hover { opacity: 0.88; transform: scale(1.02); }
+.btnc-mod  { background: #fb923c; color: #3d1800; }
+.btnc-crit { background: #f87171; color: #3d0000; }
+.announce-c {
+  font-size: 13px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+  display: flex; align-items: center; gap: 8px;
+}
+.ac-mineur  { color: #86efac; }
+.ac-modere  { color: #fdba74; }
+.ac-critique{ color: #fca5a5; }
+
+.line-logo-c {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+}
+.lc-circle {
+  width: 110px; height: 110px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 42px; font-weight: 900; color: white;
+}
+.lc-diamond {
+  width: 90px; height: 90px; transform: rotate(45deg); border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+}
+.lc-diamond span { transform: rotate(-45deg); font-size: 28px; font-weight: 900; color: white; display: block; }
+.lc-tail { width: 14px; height: 28px; border-radius: 0 0 4px 4px; }
+.lc-name { font-size: 13px; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+
+/* ─── Selector bar ─── */
+.sel-bar {
+  display: flex; align-items: center; justify-content: center;
+  gap: 8px; padding: 12px 16px; flex-wrap: wrap;
+  background: #222; border-top: 1px solid #333; border-radius: 0 0 16px 16px;
+}
+.sl { font-size: 11px; color: #666; margin-right: 4px; }
+.sb {
+  padding: 5px 14px; border-radius: 999px; font-size: 11px; font-weight: 700;
+  border: 1px solid #444; background: #2a2a2a; color: #888; cursor: pointer;
+  transition: all 0.15s;
+}
+.sb:hover, .sb.on { background: #3a3a3a; color: #ddd; border-color: #666; }
+</style>
+
+<div class="wrapper">
+  <div class="tabs">
+    <button class="tab green active"  onclick="showDesign('a')">Design A — Épuré</button>
+    <button class="tab orange"        onclick="showDesign('b')">Design B — Deux colonnes</button>
+    <button class="tab red"           onclick="showDesign('c')">Design C — Tableau de bord</button>
+  </div>
+
+  <!-- ===== DESIGN A ===== -->
+  <div class="screen active" id="screen-a">
+    <div class="design-a bg-mineur" id="da-bg">
+      <div class="top-bar bar-mineur" id="da-bar"></div>
+      <div class="announce an-mineur" id="da-ann" style="padding-top:0;margin-top:0;top:6px">
+        <svg class="ann-icon" viewBox="0 0 16 16" fill="none"><path d="M8 2L14.5 13H1.5L8 2Z" stroke="currentColor" stroke-width="1.5" fill="none"/><line x1="8" y1="6.5" x2="8" y2="10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="12" r="0.8" fill="currentColor"/></svg>
+        Annonce voyageur requise
+      </div>
+      <div style="height:56px"></div>
+      <div class="severity-pill sp-mineur" id="da-pill"><div class="sdot"></div><span id="da-sev-txt">Mineur</span></div>
+      <div class="pulse-ring pr-mineur" id="da-ring">
+        <div class="line-circle-a" id="da-logo" style="background:#E8621A">T1</div>
+      </div>
+      <div class="station-a" id="da-station">Attacharouk</div>
+      <div class="incident-a">Incident voyageur</div>
+      <div class="time-a">Déclenché à <b id="da-time">--:--:--</b></div>
+      <div class="timer-a">
+        <div class="tblock-a"><div class="tval-a tv-mineur" id="da-h">00</div><div class="tunit-a">Heures</div></div>
+        <div class="tsep-a">:</div>
+        <div class="tblock-a"><div class="tval-a tv-mineur" id="da-m">00</div><div class="tunit-a">Minutes</div></div>
+        <div class="tsep-a">:</div>
+        <div class="tblock-a"><div class="tval-a tv-mineur" id="da-s">00</div><div class="tunit-a">Secondes</div></div>
+      </div>
+      <div class="btns-a">
+        <button class="btn-a btn-mod">Passer en modéré</button>
+        <button class="btn-a btn-crit">Passer en critique</button>
+      </div>
+    </div>
+    <div class="sel-bar">
+      <span class="sl">Ligne :</span>
+      <button class="sb on" onclick="setLineA('T1','#E8621A','circle',this)">T1</button>
+      <button class="sb" onclick="setLineA('T2','#F5C200','circle',this)">T2</button>
+      <button class="sb" onclick="setLineA('T3','#7B2D6E','circle',this)">T3</button>
+      <button class="sb" onclick="setLineA('T4','#4A7DB5','circle',this)">T4</button>
+      <button class="sb" onclick="setLineA('BW1','#1E6B45','diamond',this)">BW1</button>
+      <button class="sb" onclick="setLineA('BW2','#5A9E35','diamond',this)">BW2</button>
+      <span class="sl" style="margin-left:10px">Sévérité :</span>
+      <button class="sb on" onclick="setSevA('mineur',this)">Mineur</button>
+      <button class="sb" onclick="setSevA('modere',this)">Modéré</button>
+      <button class="sb" onclick="setSevA('critique',this)">Critique</button>
+    </div>
+  </div>
+
+  <!-- ===== DESIGN B ===== -->
+  <div class="screen" id="screen-b">
+    <div class="design-b bg-mineur" id="db-bg">
+      <div class="top-stripe-b ts-mineur" id="db-stripe">
+        <div class="ts-title">Incident en cours</div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:13px;color:rgba(255,255,255,0.4)">Déclenché à <b id="db-time" style="color:rgba(255,255,255,0.65)">--:--:--</b></span>
+          <div class="ts-badge tsb-mineur" id="db-badge"><div class="sdot"></div><span id="db-sev">Mineur</span></div>
+        </div>
+      </div>
+      <div class="col-left-b" style="margin-top:56px">
+        <div id="db-logo-wrap">
+          <div class="large-line-b" id="db-logo" style="background:#E8621A">T1</div>
+        </div>
+        <div class="station-b" id="db-station">Attacharouk</div>
+        <div style="margin-top:20px;font-size:40px;font-weight:900;color:#fff;text-align:center;line-height:1.1">Incident<br>voyageur</div>
+      </div>
+      <div class="divider-b"></div>
+      <div class="col-right-b" style="margin-top:56px">
+        <div>
+          <div class="label-b" style="margin-bottom:14px">Durée incident</div>
+          <div class="timer-row-b">
+            <div class="tblk-b"><div class="tv-b" id="db-h">00</div><div class="tu-b">Heures</div></div>
+            <div class="tsep-b">:</div>
+            <div class="tblk-b"><div class="tv-b" id="db-m">00</div><div class="tu-b">Minutes</div></div>
+            <div class="tsep-b">:</div>
+            <div class="tblk-b"><div class="tv-b" id="db-s">00</div><div class="tu-b">Secondes</div></div>
+          </div>
+        </div>
+        <div class="btns-b">
+          <button class="btnb btnb-mod">Passer en modéré</button>
+          <button class="btnb btnb-crit">Passer en critique</button>
+        </div>
+      </div>
+    </div>
+    <div class="sel-bar">
+      <span class="sl">Ligne :</span>
+      <button class="sb on" onclick="setLineB('T1','#E8621A','circle',this)">T1</button>
+      <button class="sb" onclick="setLineB('T2','#F5C200','circle',this)">T2</button>
+      <button class="sb" onclick="setLineB('T3','#7B2D6E','circle',this)">T3</button>
+      <button class="sb" onclick="setLineB('T4','#4A7DB5','circle',this)">T4</button>
+      <button class="sb" onclick="setLineB('BW1','#1E6B45','diamond',this)">BW1</button>
+      <button class="sb" onclick="setLineB('BW2','#5A9E35','diamond',this)">BW2</button>
+      <span class="sl" style="margin-left:10px">Sévérité :</span>
+      <button class="sb on" onclick="setSevB('mineur',this)">Mineur</button>
+      <button class="sb" onclick="setSevB('modere',this)">Modéré</button>
+      <button class="sb" onclick="setSevB('critique',this)">Critique</button>
+    </div>
+  </div>
+
+  <!-- ===== DESIGN C ===== -->
+  <div class="screen" id="screen-c">
+    <div class="design-c bg-mineur" id="dc-bg">
+      <div class="header-c hc-mineur" id="dc-header" style="background:rgba(0,0,0,0.2);border-bottom:1px solid rgba(74,222,128,0.2)">
+        <div class="hc-left">
+          <div class="hc-icon hci-mineur" id="dc-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 3L21 20H3L12 3Z" stroke="#4ade80" stroke-width="2" fill="none"/><line x1="12" y1="10" x2="12" y2="15" stroke="#4ade80" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="17.5" r="1" fill="#4ade80"/></svg>
+          </div>
+          <div class="hc-texts">
+            <div class="hc-sub hcs-mineur" id="dc-sev">Incident mineur</div>
+            <div class="hc-title">Annonce voyageur requise</div>
+          </div>
+        </div>
+        <div class="hc-right">
+          <div class="hc-time">Déclenché à <b id="dc-time">--:--:--</b></div>
+        </div>
+      </div>
+
+      <div class="body-c" id="dc-body">
+        <div class="cell-c cell-bg-mineur" id="dcc1">
+          <div class="cell-label-c">Ligne</div>
+          <div class="line-logo-c">
+            <div class="lc-circle" id="dc-logo" style="background:#E8621A">T1</div>
+            <div class="lc-tail" id="dc-tail" style="background:#E8621A"></div>
+            <div class="lc-name" id="dc-sta">Attacharouk</div>
+          </div>
+        </div>
+        <div class="cell-c cell-bg-dark-mineur" id="dcc2">
+          <div class="cell-label-c">Type d'incident</div>
+          <div class="cell-val-c" style="font-size:32px;line-height:1.2">Incident<br>voyageur</div>
+        </div>
+        <div class="cell-c cell-bg-mineur" id="dcc3">
+          <div class="cell-label-c">Durée incident</div>
+          <div class="timer-c">
+            <div><div class="tv-c" id="dc-h">00</div><div class="tu-c">H</div></div>
+            <div class="ts-c">:</div>
+            <div><div class="tv-c" id="dc-m">00</div><div class="tu-c">Min</div></div>
+            <div class="ts-c">:</div>
+            <div><div class="tv-c" id="dc-s">00</div><div class="tu-c">Sec</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="footer-c" id="dc-footer" style="background:rgba(0,0,0,0.2)">
+        <div class="announce-c ac-mineur" id="dc-ann">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2L14.5 13H1.5L8 2Z" stroke="currentColor" stroke-width="1.5" fill="none"/><line x1="8" y1="6.5" x2="8" y2="10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="12" r="0.8" fill="currentColor"/></svg>
+          Annonce voyageur requise
+        </div>
+        <div class="btns-c">
+          <button class="btnc btnc-mod">Passer en modéré</button>
+          <button class="btnc btnc-crit">Passer en critique</button>
+        </div>
+      </div>
+    </div>
+    <div class="sel-bar">
+      <span class="sl">Ligne :</span>
+      <button class="sb on" onclick="setLineC('T1','#E8621A','circle',this)">T1</button>
+      <button class="sb" onclick="setLineC('T2','#F5C200','circle',this)">T2</button>
+      <button class="sb" onclick="setLineC('T3','#7B2D6E','circle',this)">T3</button>
+      <button class="sb" onclick="setLineC('T4','#4A7DB5','circle',this)">T4</button>
+      <button class="sb" onclick="setLineC('BW1','#1E6B45','diamond',this)">BW1</button>
+      <button class="sb" onclick="setLineC('BW2','#5A9E35','diamond',this)">BW2</button>
+      <span class="sl" style="margin-left:10px">Sévérité :</span>
+      <button class="sb on" onclick="setSevC('mineur',this)">Mineur</button>
+      <button class="sb" onclick="setSevC('modere',this)">Modéré</button>
+      <button class="sb" onclick="setSevC('critique',this)">Critique</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function pad(n){return String(n).padStart(2,'0');}
+let t0 = Date.now();
+
+function tick(){
+  let e=Math.floor((Date.now()-t0)/1000);
+  let h=Math.floor(e/3600),m=Math.floor((e%3600)/60),s=e%60;
+  let fields=[['da-h','da-m','da-s'],['db-h','db-m','db-s'],['dc-h','dc-m','dc-s']];
+  fields.forEach(f=>{
+    document.getElementById(f[0]).textContent=pad(h);
+    document.getElementById(f[1]).textContent=pad(m);
+    document.getElementById(f[2]).textContent=pad(s);
+  });
+}
+setInterval(tick,1000); tick();
+let now=new Date(), ts=pad(now.getHours())+':'+pad(now.getMinutes())+':'+pad(now.getSeconds());
+['da-time','db-time','dc-time'].forEach(id=>{ let el=document.getElementById(id); if(el) el.textContent=ts; });
+
+const stations={T1:'Attacharouk',T2:'Centre Ville',T3:'Université',T4:'Aéroport',BW1:'Bab Ezzouar',BW2:'El Harrach'};
+
+const sevCfg={
+  mineur:  {bg:'#1a5c2a', bar:'bar-mineur',  pill:'sp-mineur',  ring:'pr-mineur',  tv:'tv-mineur',  ann:'an-mineur',  stripe:'ts-mineur',  badge:'tsb-mineur',  hcsub:'hcs-mineur',  hci:'hci-mineur',  cell1:'cell-bg-mineur',  cell2:'cell-bg-dark-mineur',  annc:'ac-mineur',  txt:'Mineur',  icon:'#4ade80'},
+  modere:  {bg:'#8b4000', bar:'bar-modere',  pill:'sp-modere',  ring:'pr-modere',  tv:'tv-modere',  ann:'an-modere',  stripe:'ts-modere',  badge:'tsb-modere',  hcsub:'hcs-modere',  hci:'hci-modere',  cell1:'cell-bg-modere',  cell2:'cell-bg-dark-modere',  annc:'ac-modere',  txt:'Modéré',  icon:'#fb923c'},
+  critique:{bg:'#7a0000', bar:'bar-critique',pill:'sp-critique',ring:'pr-critique',tv:'tv-critique',ann:'an-critique',stripe:'ts-critique',badge:'tsb-critique',hcsub:'hcs-critique',hci:'hci-critique',cell1:'cell-bg-critique',cell2:'cell-bg-dark-critique',annc:'ac-critique',txt:'Critique',icon:'#f87171'}
+};
+
+let curSevA='mineur', curSevB='mineur', curSevC='mineur';
+
+function clearGroup(bar,cls){
+  bar.querySelectorAll('.sb').forEach(b=>{ if([...b.classList].some(c=>['on'].includes(c))) b.classList.remove('on'); });
+}
+
+function showDesign(d){
+  ['a','b','c'].forEach(x=>{ document.getElementById('screen-'+x).classList.remove('active'); });
+  document.getElementById('screen-'+d).classList.add('active');
+  document.querySelectorAll('.tab').forEach((t,i)=>{ t.classList.remove('active'); });
+  document.querySelectorAll('.tab')[['a','b','c'].indexOf(d)].classList.add('active');
+}
+
+function applyLogoA(id,color,shape){
+  let tc=(id==='T2')?'#333':'white';
+  let logo=document.getElementById('da-logo');
+  if(shape==='circle'){
+    logo.className='line-circle-a'; logo.style.background=color; logo.style.color=tc; logo.style.transform=''; logo.style.borderRadius='50%'; logo.style.width='130px'; logo.style.height='130px'; logo.innerHTML=id;
+  } else {
+    logo.className='line-circle-a'; logo.style.background=color; logo.style.color='white'; logo.style.borderRadius='12px'; logo.style.transform='rotate(45deg)'; logo.style.width='110px'; logo.style.height='110px';
+    logo.innerHTML='<span style="transform:rotate(-45deg);display:block;font-size:38px;font-weight:900">'+id+'</span>';
+  }
+  document.getElementById('da-station').textContent=stations[id];
+}
+
+function setLineA(id,color,shape,btn){
+  let bar=btn.closest('.sel-bar'); bar.querySelectorAll('.sb').forEach(b=>{ if(['T1','T2','T3','T4','BW1','BW2'].includes(b.textContent)) b.classList.remove('on'); }); btn.classList.add('on');
+  applyLogoA(id,color,shape);
+}
+
+function setSevA(sev,btn){
+  curSevA=sev; let c=sevCfg[sev];
+  let bar=btn.closest('.sel-bar'); bar.querySelectorAll('.sb').forEach(b=>{ if(['Mineur','Modéré','Critique'].includes(b.textContent)) b.classList.remove('on'); }); btn.classList.add('on');
+  let bg=document.getElementById('da-bg'); bg.className='design-a'; bg.style.background=c.bg;
+  document.getElementById('da-bar').className='top-bar '+c.bar;
+  document.getElementById('da-pill').className='severity-pill '+c.pill;
+  document.getElementById('da-ring').className='pulse-ring '+c.ring;
+  document.getElementById('da-ann').className='announce '+c.ann;
+  document.getElementById('da-sev-txt').textContent=c.txt;
+  ['da-h','da-m','da-s'].forEach(id=>{ document.getElementById(id).className='tval-a '+c.tv; });
+}
+
+function setLineB(id,color,shape,btn){
+  let bar=btn.closest('.sel-bar'); bar.querySelectorAll('.sb').forEach(b=>{ if(['T1','T2','T3','T4','BW1','BW2'].includes(b.textContent)) b.classList.remove('on'); }); btn.classList.add('on');
+  let tc=(id==='T2')?'#333':'white';
+  let wrap=document.getElementById('db-logo-wrap');
+  if(shape==='circle'){
+    wrap.innerHTML='<div class="large-line-b" id="db-logo" style="background:'+color+';color:'+tc+'">'+id+'</div>';
+  } else {
+    wrap.innerHTML='<div class="large-diamond-b" id="db-logo" style="background:'+color+'"><span>'+id+'</span></div>';
+  }
+  document.getElementById('db-station').textContent=stations[id];
+}
+
+function setSevB(sev,btn){
+  curSevB=sev; let c=sevCfg[sev];
+  let bar=btn.closest('.sel-bar'); bar.querySelectorAll('.sb').forEach(b=>{ if(['Mineur','Modéré','Critique'].includes(b.textContent)) b.classList.remove('on'); }); btn.classList.add('on');
+  document.getElementById('db-bg').style.background=c.bg;
+  document.getElementById('db-bg').className='design-b';
+  document.getElementById('db-stripe').className='top-stripe-b '+c.stripe;
+  document.getElementById('db-badge').className='ts-badge '+c.badge;
+  document.getElementById('db-sev').textContent=c.txt;
+}
+
+function setLineC(id,color,shape,btn){
+  let bar=btn.closest('.sel-bar'); bar.querySelectorAll('.sb').forEach(b=>{ if(['T1','T2','T3','T4','BW1','BW2'].includes(b.textContent)) b.classList.remove('on'); }); btn.classList.add('on');
+  let tc=(id==='T2')?'#333':'white';
+  let logo=document.getElementById('dc-logo');
+  let tail=document.getElementById('dc-tail');
+  if(shape==='circle'){
+    logo.className='lc-circle'; logo.style.background=color; logo.style.color=tc; logo.style.transform=''; logo.style.width='110px'; logo.style.height='110px'; logo.style.borderRadius='50%'; logo.innerHTML=id;
+  } else {
+    logo.className='lc-circle'; logo.style.background=color; logo.style.color='white'; logo.style.width='90px'; logo.style.height='90px'; logo.style.borderRadius='10px'; logo.style.transform='rotate(45deg)';
+    logo.innerHTML='<span style="transform:rotate(-45deg);display:block;font-size:26px;font-weight:900">'+id+'</span>';
+  }
+  tail.style.background=color;
+  document.getElementById('dc-sta').textContent=stations[id];
+}
+
+function setSevC(sev,btn){
+  curSevC=sev; let c=sevCfg[sev];
+  let bar=btn.closest('.sel-bar'); bar.querySelectorAll('.sb').forEach(b=>{ if(['Mineur','Modéré','Critique'].includes(b.textContent)) b.classList.remove('on'); }); btn.classList.add('on');
+  document.getElementById('dc-bg').style.background=c.bg;
+  document.getElementById('dcc1').className='cell-c '+c.cell1;
+  document.getElementById('dcc2').className='cell-c '+c.cell2;
+  document.getElementById('dcc3').className='cell-c '+c.cell1;
+  document.getElementById('dc-sev').className='hc-sub '+c.hcsub;
+  document.getElementById('dc-sev').textContent='Incident '+c.txt.toLowerCase();
+  document.getElementById('dc-icon').className='hc-icon '+c.hci;
+  document.getElementById('dc-ann').className='announce-c '+c.annc;
+  document.getElementById('dc-icon').querySelector('path').setAttribute('stroke',c.icon);
+  document.getElementById('dc-icon').querySelector('line').setAttribute('stroke',c.icon);
+  document.getElementById('dc-icon').querySelector('circle').setAttribute('fill',c.icon);
+}
+</script>
